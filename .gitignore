@@ -1,0 +1,14 @@
+# Dependencias y build (regenerables)
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Secretos / config local — NUNCA commitear
+.env
+.env*.local
+.vercel/
+
+# Logs / OS
+*.log
+.DS_Store
