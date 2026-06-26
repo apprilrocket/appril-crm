@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "appril-campaigns": {
+      "command": "node",
+      "args": ["mcp/dist/index.js"],
+      "comment": "MCP del CRM de Appril. Lee credenciales de mcp/.env (no versionado). Build: cd mcp && npm install && npm run build"
+    }
+  }
+}
