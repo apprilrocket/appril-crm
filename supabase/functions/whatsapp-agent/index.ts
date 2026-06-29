@@ -204,6 +204,8 @@ Tóquelo como si usted fuera el paciente."
       : `⚠️ DEMO YA ENVIADA, SIN RESPUESTA AÚN — NO incluir [CREATE_DEMO]. NO decir "Le voy a mostrar algo en vivo" ni hacer promesas de que llegará un mensaje. Di: "Doctor/a, ya le envié la demo anteriormente — debe haberle llegado un WhatsApp desde el número de pacientes de Appril, diferente a este chat. ¿Lo encontró?" Si dice que no llegó: [HANDOFF_MAURICIO:${ctx.name}]`
     : "Una sola vez por conversación."}
 
+REENVÍO POR INSISTENCIA (override): las notas "NO incluir [CREATE_DEMO]" de arriba aplican solo a que TÚ no la re-ofrezcas sola. Si el DOCTOR la pide explícitamente otra vez ("no me llegó", "mándemela de nuevo", "muéstreme otra vez", "no la veo"), SÍ incluye [CREATE_DEMO] de nuevo — el sistema la reenvía en OTRO horario y le vuelve a llegar. En ese caso NO hagas handoff por "no llegó"; reenvía primero, con naturalidad ("Se la reenvío ahora mismo, doctor — en unos segundos le llega."), sin repetir explicaciones largas.
+
 NUNCA digas "Le acabo de crear" ni "Ya le envié" — eso lo confirma el sistema, no tú.
 
 REMATE SEGÚN ACCIÓN:
@@ -766,14 +768,17 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   // el mensaje queda registrado para el inbox, pero el agente IA no responde.
   if (lead.agent_paused) return;
 
-  // Cooldown de demo: una demo "ya creada" solo bloquea una nueva DENTRO de esta
-  // ventana. Fuera del cooldown, una petición explícita del doctor genera una demo
-  // fresca (los doctores vuelven; pedir la demo de nuevo NO es spam, es solicitud).
-  // Configurable en app_config.demo_cooldown_hours (default 24h, alineado con que la
-  // demo agenda "mañana" → al día siguiente el cupo es otro y prod no deduplica).
-  const { data: cooldownCfg } = await sb
-    .from("app_config").select("value").eq("key", "demo_cooldown_hours").maybeSingle();
-  const demoCooldownHours = Number(cooldownCfg?.value) || 24;
+  // Demo — dos ventanas distintas:
+  //  · demoCutoff (HORAS, default 24): el agente RECUERDA que ya hubo demo y su resultado
+  //    (contexto del prompt) para no re-ofrecerla sola ni re-anunciarla.
+  //  · guarda corta (MINUTOS, default 3): SOLO evita crear dos demos casi simultáneas
+  //    (reintentos / mismo turno). Si el doctor INSISTE pasada la guarda, se crea otra
+  //    demo (en otro horario) — pedir la demo de nuevo NO es spam, es solicitud explícita.
+  const { data: demoCfg } = await sb
+    .from("app_config").select("key, value").in("key", ["demo_cooldown_hours", "demo_resend_guard_minutes"]);
+  const cfgMap: Record<string, string> = Object.fromEntries((demoCfg ?? []).map((r: any) => [r.key, r.value]));
+  const demoCooldownHours = Number(cfgMap["demo_cooldown_hours"]) || 24;
+  const demoGuardMinutes  = Number(cfgMap["demo_resend_guard_minutes"]) || 3;
   const demoCutoff = new Date(Date.now() - demoCooldownHours * 3600_000).toISOString();
 
   // Datos de discovery, demo y resultado de la demo en paralelo.
@@ -789,7 +794,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
       .maybeSingle(),
     sb
       .from("lead_events")
-      .select("id, event_value")
+      .select("id, event_value, created_at")
       .eq("lead_id", lead.id)
       .eq("event_type", "demo_created")
       .gte("created_at", demoCutoff)
@@ -808,6 +813,11 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   ]);
 
   const messageCount = (history ?? []).length;
+
+  // Guarda anti-doble-disparo: ¿se creó una demo en los últimos demoGuardMinutes?
+  // Solo esto bloquea una nueva creación; pasada la guarda, una petición explícita la recrea.
+  const demoRecentlyCreated = !!demoEvent &&
+    (Date.now() - new Date((demoEvent as any).created_at).getTime()) < demoGuardMinutes * 60_000;
 
   const rc = riskCopy(disc?.risk_dominant);
 
@@ -875,8 +885,10 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
     metadata: { buttons, handoff: handoffMauricio, model: "claude-sonnet-4-6" },
   });
 
-  // Post-procesamiento (no bloquea el contexto del siguiente mensaje)
-  if (createDemo && !ctx.demoAlreadyCreated) {
+  // Post-procesamiento (no bloquea el contexto del siguiente mensaje).
+  // Guarda corta anti-doble-disparo (no el cooldown largo): si el doctor INSISTE
+  // pasados unos minutos, se crea otra demo (en otro horario) y le vuelve a llegar.
+  if (createDemo && !demoRecentlyCreated) {
     await handleDemoCreation(lead, fromPhone, sb);
   }
 
@@ -995,6 +1007,19 @@ async function handleDemoCreation(lead: any, fromPhone: string, sb: any) {
       ? "Doctor"
       : lead.full_name;
 
+    // Variar el horario del cupo para que un REENVÍO (el doctor insiste) no choque con
+    // el dedup exacto-por-cupo de prod (mismo paciente + mismo starts_at_utc). Cada demo
+    // del día va a un cupo distinto: 09:00, 09:30, 10:00… → cita nueva → recordatorio nuevo.
+    const { count: priorDemos } = await sb
+      .from("lead_events")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", lead.id)
+      .eq("event_type", "demo_created")
+      .gte("created_at", new Date(Date.now() - 24 * 3600_000).toISOString());
+    const slotIdx  = (priorDemos ?? 0) % 20;             // 09:00–18:30, evita desbordar el día
+    const startMin = 9 * 60 + slotIdx * 30;
+    const demoTime = `${String(Math.floor(startMin / 60)).padStart(2, "0")}:${String(startMin % 60).padStart(2, "0")}`;
+
     const res = await fetch(APPRIL_DEMO_URL, {
       method: "POST",
       headers: {
@@ -1005,6 +1030,7 @@ async function handleDemoCreation(lead: any, fromPhone: string, sb: any) {
         full_name:    fullName,
         phone_e164:   fromPhone,
         callback_url: DEMO_CALLBACK_URL,
+        time:         demoTime,
       }),
     });
 
@@ -1057,19 +1083,11 @@ async function handleDemoCreation(lead: any, fromPhone: string, sb: any) {
       return;
     }
 
-    // Demo nueva confirmada por Appril prod
-    const firstName = fullName.split(" ")[0];
-    const introMsg = `Listo, ${firstName}. En unos segundos le va a llegar un WhatsApp desde el número de pacientes de Appril — no desde este chat.\n\nTóquelo como si usted fuera el paciente.`;
-    await sendWA(fromPhone, introMsg, []);
-    // Registrar el mensaje enviado para que aparezca en el inbox.
-    await sb.from("lead_events").insert({
-      workspace_id:  WORKSPACE_ID,
-      lead_id:       lead.id,
-      event_type:    "wa_agent_reply",
-      event_channel: "whatsapp",
-      event_value:   introMsg,
-      metadata:      { via: "demo_intro" },
-    });
+    // Demo nueva confirmada por Appril prod.
+    // NO enviamos un anuncio aquí: el agente (Claude) YA anunció la demo en su respuesta
+    // ("en unos segundos le llega un WhatsApp…"). Mandar otro aviso aquí duplicaba el mensaje.
+    // El evento demo_created ya quedó registrado arriba; el recordatorio con botones lo
+    // dispara Appril prod. Una sola voz = conversación natural.
   } catch (err) {
     console.error("Demo creation error:", err);
     // No enviamos mensaje al doctor si falló — no prometemos lo que no pudimos hacer
