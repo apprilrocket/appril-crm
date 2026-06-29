@@ -382,3 +382,21 @@ s3_region = "env(S3_REGION)"
 s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
+
+# ── Edge Functions ───────────────────────────────────────────────────────────
+# Webhooks PÚBLICOS: Meta/Appril prod NO envían JWT de Supabase; se autentican por
+# firma/secret DENTRO de la función (HMAC x-hub-signature-256 / x-demo-secret).
+# verify_jwt DEBE ser false o el gateway responde 401 a todos los webhooks.
+# (Incidente 2026-06-29: un deploy con el default verify_jwt=true tumbó el inbound.)
+[functions.whatsapp-agent]
+verify_jwt = false
+
+[functions.demo-callback]
+verify_jwt = false
+
+[functions.send-discovery-email]
+verify_jwt = false
+
+# inbox-send se invoca desde el dashboard con el JWT del usuario → mantener verify.
+[functions.inbox-send]
+verify_jwt = true
