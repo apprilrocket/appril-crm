@@ -6,7 +6,39 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { SegmentBadge } from '@/components/SegmentBadge';
-import { Send, Bot, User, Mail, ExternalLink, RefreshCw } from 'lucide-react';
+import { eventMeta } from '@/lib/events';
+import { Send, Bot, User, Mail, ExternalLink, RefreshCw, MousePointerClick } from 'lucide-react';
+
+// Linkify seguro (sin dangerouslySetInnerHTML): parte el texto por URLs y
+// renderiza los segmentos http(s) como <a>. Preserva whitespace-pre-wrap
+// porque el texto entre links se emite tal cual.
+const URL_RE = /(https?:\/\/[^\s]+)/g;
+function linkify(text: string) {
+  if (!text) return text;
+  const parts = text.split(URL_RE);
+  return parts.map((part, i) => {
+    if (i % 2 === 1) {
+      // Quitar puntuación de cierre común pegada al final de la URL.
+      const m = part.match(/^(.*?)([.,;:!?)\]]*)$/s);
+      const url = m ? m[1] : part;
+      const trail = m ? m[2] : '';
+      return (
+        <span key={i}>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline break-all"
+          >
+            {url}
+          </a>
+          {trail}
+        </span>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
 
 type Lead = {
   id: string;
@@ -21,12 +53,15 @@ type Lead = {
 
 type Message = {
   id: string;
-  direction: 'in' | 'out';
-  via: string; // 'lead' | 'agent' | 'manual' | 'campaign' | 'automation' | 'queue'
+  direction: 'in' | 'out' | 'system';
+  via: string; // 'lead' | 'agent' | 'manual' | 'campaign' | 'automation' | 'queue' | event_type (system)
   channel: string;
   body: string;
   status: string;
   happened_at: string;
+  buttons?: string[] | null;
+  kind?: 'message' | 'system';
+  is_button_reply?: boolean;
 };
 
 const VIA_LABEL: Record<string, string> = {
@@ -154,20 +189,39 @@ export function Conversation({ lead, messages }: { lead: Lead; messages: Message
       {/* Mensajes */}
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2">
         {messages.map(m => {
+          // Eventos de sistema: chip centrado, discreto (no burbuja izq/der).
+          if (m.kind === 'system' || m.direction === 'system') {
+            const meta = eventMeta(m.via);
+            return (
+              <div key={m.id} className="flex justify-center my-1">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-100 border border-neutral-200 text-[11px] text-neutral-600">
+                  <span>{meta.icon}</span>
+                  <span>{m.body}</span>
+                  <span className="text-neutral-400">
+                    · {new Date(m.happened_at).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              </div>
+            );
+          }
+
           const isIn = m.direction === 'in';
           const isAgent = m.via === 'agent';
+          const isButtonReply = isIn && m.is_button_reply === true;
           return (
             <div key={m.id} className={cn('flex', isIn ? 'justify-start' : 'justify-end')}>
               <div
                 className={cn(
                   'max-w-[70%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap break-words',
-                  isIn
-                    ? 'bg-white border border-neutral-200 text-neutral-900 rounded-bl-sm'
-                    : isAgent
-                      ? 'bg-violet-600 text-white rounded-br-sm'
-                      : m.via === 'manual'
-                        ? 'bg-brand-600 text-white rounded-br-sm'
-                        : 'bg-neutral-200 text-neutral-800 rounded-br-sm'
+                  isButtonReply
+                    ? 'bg-white border border-dashed border-emerald-300 text-neutral-900 rounded-bl-sm'
+                    : isIn
+                      ? 'bg-white border border-neutral-200 text-neutral-900 rounded-bl-sm'
+                      : isAgent
+                        ? 'bg-violet-600 text-white rounded-br-sm'
+                        : m.via === 'manual'
+                          ? 'bg-brand-600 text-white rounded-br-sm'
+                          : 'bg-neutral-200 text-neutral-800 rounded-br-sm'
                 )}
               >
                 {!isIn && (
@@ -179,7 +233,35 @@ export function Conversation({ lead, messages }: { lead: Lead; messages: Message
                     {m.status === 'pending' && <span>· en cola</span>}
                   </div>
                 )}
-                {m.body}
+                {isButtonReply ? (
+                  <div className="inline-flex items-center gap-1.5">
+                    <MousePointerClick size={13} className="text-emerald-600 shrink-0" />
+                    <span>
+                      <span className="text-[11px] text-emerald-700 font-medium">tocó el botón: </span>
+                      «{m.body}»
+                    </span>
+                  </div>
+                ) : (
+                  linkify(m.body)
+                )}
+                {/* Botones ofrecidos por el agente: pills no interactivas bajo el texto */}
+                {!isIn && m.buttons && m.buttons.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {m.buttons.map((b, i) => (
+                      <span
+                        key={i}
+                        className={cn(
+                          'px-2 py-0.5 text-[11px] rounded-full border',
+                          isAgent || m.via === 'manual'
+                            ? 'border-white/40 text-white/90'
+                            : 'border-neutral-400 text-neutral-700'
+                        )}
+                      >
+                        {b}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className={cn('text-[10px] mt-1', isIn ? 'text-neutral-400' : 'opacity-60')}>
                   {new Date(m.happened_at).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                 </div>

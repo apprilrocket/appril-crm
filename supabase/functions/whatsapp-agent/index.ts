@@ -400,7 +400,7 @@ Mantener mentalmente en cada mensaje:
 
 DOLORES A DETECTAR: confirmaciones manuales · cancelaciones tardías · reagendamiento manual · asistente saturada · profesional solo gestionando todo · WA caótico · sistema que no cierra el ciclo · falta de estadísticas.
 
-RESTRICCIONES: Nunca inventar precios. Nunca prometer features no listadas. Nunca presionar más de 3 veces en la misma conversación. Si dice "no" → despedida cálida y parar. Si no sabe algo → "Déjame confirmarte ese detalle." + [HANDOFF_MAURICIO].
+RESTRICCIONES: Nunca inventar precios. Nunca prometer features no listadas. Nunca presionar más de 3 veces en la misma conversación. Si dice "no" → despedida cálida y parar. Si no sabe algo → "Déjame confirmarte ese detalle." + [HANDOFF_MAURICIO]. El ÚNICO link de registro válido es ${SIGNUP_URL} — nunca uses otra variante (jamás app.appril.co/auth/sign-up).
 
 ━━━ REGLA FINAL ━━━
 
@@ -534,16 +534,39 @@ function isOptOut(text: string): boolean {
     || /\b(no me escriba[sn]? mas|dejen de escribirme|quitenme de la lista|sacame de la lista)\b/.test(t);
 }
 
+// ── Detección de contestador automático (WhatsApp Business de otros consultorios) ─
+// Conservadora: frases típicas de auto-respuesta. No es un humano → no responder.
+function isAutoResponder(text: string): boolean {
+  const t = text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return /gracias por (comunicarte|escribir|contactar|tu mensaje|escribirnos)/.test(t)
+    || /en este momento no (podemos|estamos|nos encontramos)/.test(t)
+    || /pronto nos pondremos en contacto/.test(t)
+    || /horario de atenci[o0]n/.test(t)
+    || /(este es un |mensaje )autom[a4]tic[o0]/.test(t)
+    || /responderemos (tan pronto|a la brevedad|lo antes|en cuanto)/.test(t)
+    || /fuera de(l)? horario/.test(t)
+    || /hemos recibido (tu|su) mensaje/.test(t)
+    || /le atenderemos (tan pronto|lo antes|en breve)/.test(t);
+}
+
 // ── Procesar mensaje ────────────────────────────────────────────────────────
 
 async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   const fromPhone = msg.from.startsWith("+") ? msg.from : `+${msg.from}`;
 
+  // Distinguir una pulsación de quick-reply/list de un texto tecleado.
+  // - msg.interactive.button_reply / list_reply → botones interactivos del agente.
+  // - msg.button { payload, text } → quick-reply de una PLANTILLA de Meta.
+  const btnReply = msg.interactive?.button_reply ?? msg.interactive?.list_reply ?? null;
+  const tplBtn = msg.button ?? null;
+
   const userText =
     msg.text?.body ??
-    msg.interactive?.button_reply?.title ??
-    msg.interactive?.list_reply?.title ??
+    btnReply?.title ??
+    tplBtn?.text ??
     null;
+
+  const isButtonReply = !!(btnReply || tplBtn);
 
   if (!userText) return;
 
@@ -623,7 +646,17 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
     event_type: "wa_reply",
     event_channel: "whatsapp",
     event_value: userText,
-    metadata: { wa_message_id: msg.id, phone: fromPhone },
+    metadata: {
+      wa_message_id: msg.id,
+      phone: fromPhone,
+      kind: isButtonReply ? "button_reply" : "text",
+      ...(isButtonReply
+        ? {
+          button_id: btnReply?.id ?? tplBtn?.payload ?? null,
+          button_title: btnReply?.title ?? tplBtn?.text ?? null,
+        }
+        : {}),
+    },
   });
   if (replyInsertErr) {
     console.log(`wa_reply duplicado o fallo de insert — no se responde dos veces (${msg.id}): ${replyInsertErr.message}`);
@@ -657,12 +690,34 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
     return;
   }
 
+  // Contestador automático del propio consultorio (WhatsApp Business): no es un
+  // humano. Lo registramos pero NO respondemos — evita gastar tokens/mensajes y
+  // loops bot-contra-bot.
+  if (isAutoResponder(userText)) {
+    await sb.from("lead_events").insert({
+      workspace_id: WORKSPACE_ID,
+      lead_id: lead.id,
+      event_type: "wa_auto_responder_skipped",
+      event_channel: "whatsapp",
+      event_value: userText.slice(0, 200),
+      metadata: { wa_message_id: msg.id },
+    });
+    return;
+  }
+
   // Mensaje entrante = consentimiento de conversación: registra opt-in si faltaba.
   if (!lead.whatsapp_opted_in) {
     await sb.from("leads_master")
       .update({ whatsapp_opted_in: true, can_whatsapp: true })
       .eq("id", lead.id);
   }
+
+  // Conversación activa con un humano → pausar las secuencias salientes para que el
+  // Sequence Executor no le siga enviando templates mientras hablamos (doble-toque).
+  await sb.from("lead_sequences")
+    .update({ status: "manual_review", updated_at: new Date().toISOString() })
+    .eq("lead_id", lead.id)
+    .eq("status", "active");
 
   // Agente pausado (handoff humano desde el inbox del CRM):
   // el mensaje queda registrado para el inbox, pero el agente IA no responde.
@@ -723,7 +778,12 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   });
 
   const raw = completion.content[0].type === "text" ? completion.content[0].text : "";
-  const { text, buttons, handoffMauricio, handoffName, mauricioMsg, createDemo } = parseResponse(raw);
+  let { text } = parseResponse(raw);
+  const { buttons, handoffMauricio, handoffName, mauricioMsg, createDemo } = parseResponse(raw);
+
+  // Normaliza cualquier variante del link de registro al oficial. El modelo a veces
+  // genera app.appril.co/auth/sign-up (heredado del documento viejo) en vez del CTA real.
+  text = fixSignupUrl(text);
 
   // Enviar respuesta al usuario
   await sendWA(fromPhone, text, buttons);
@@ -751,6 +811,18 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
       ? mauricioMsg.trim()
       : buildMauricioSummary(handoffName, disc, userText, ctx);
     await sendWA(`+${MAURICIO_WA}`, summary, []);
+
+    // Handoff real: pausar el agente para que Mauricio tome el control sin que el
+    // bot le siga hablando al lead en paralelo. Registrar evento auditable.
+    await sb.from("leads_master").update({ agent_paused: true }).eq("id", lead.id);
+    await sb.from("lead_events").insert({
+      workspace_id: WORKSPACE_ID,
+      lead_id: lead.id,
+      event_type: "escalated_to_human",
+      event_channel: "whatsapp",
+      event_value: (handoffName && handoffName !== "Desconocido") ? handoffName : ctx.name,
+      metadata: { to: MAURICIO_WA },
+    });
   }
 }
 
@@ -805,6 +877,16 @@ function parseResponse(raw: string): ParsedResponse {
   return { text, buttons, handoffMauricio, handoffName, mauricioMsg, createDemo };
 }
 
+// ── Normalizar link de registro ───────────────────────────────────────────────
+// El único link válido es SIGNUP_URL. Reemplaza cualquier variante que el modelo
+// genere (app.appril.co/auth/sign-up, /signup, /registro, etc.) por el oficial.
+function fixSignupUrl(text: string): string {
+  return text.replace(
+    /https?:\/\/(?:app|www)\.appril\.co\/(?:auth\/)?(?:sign-?up|signup|empezar|registro)/gi,
+    SIGNUP_URL,
+  );
+}
+
 // ── Crear cita demo en Appril ────────────────────────────────────────────────
 
 async function handleDemoCreation(lead: any, fromPhone: string, sb: any) {
@@ -831,11 +913,17 @@ async function handleDemoCreation(lead: any, fromPhone: string, sb: any) {
 
     if (!res.ok || !data.ok) {
       console.error("Demo creation failed:", JSON.stringify(data));
-      await sendWA(
-        fromPhone,
-        `Parece que hubo un problema técnico con la demo. No quiero hacerle perder tiempo.\n\nLe paso con Mauricio para que se la muestre directamente:\nWhatsApp: +57 300 4860240`,
-        [],
-      );
+      const errMsg = `Parece que hubo un problema técnico con la demo. No quiero hacerle perder tiempo.\n\nLe paso con Mauricio para que se la muestre directamente:\nWhatsApp: +57 300 4860240`;
+      await sendWA(fromPhone, errMsg, []);
+      // Registrar el mensaje enviado para que aparezca en el inbox.
+      await sb.from("lead_events").insert({
+        workspace_id:  WORKSPACE_ID,
+        lead_id:       lead.id,
+        event_type:    "wa_agent_reply",
+        event_channel: "whatsapp",
+        event_value:   errMsg,
+        metadata:      { via: "demo_creation_error" },
+      });
       return;
     }
 
@@ -856,21 +944,33 @@ async function handleDemoCreation(lead: any, fromPhone: string, sb: any) {
 
     if (isDuplicate) {
       // No llegará un WA nuevo porque Appril prod ya tiene una cita para este número
-      await sendWA(
-        fromPhone,
-        `El sistema de Appril ya tenía una cita demo registrada con su número.\n\nRevise si le llegó anteriormente un WhatsApp desde un número diferente al de este chat.\n\nSi no lo encuentra, le paso con Mauricio para que se la muestre directamente.`,
-        [],
-      );
+      const dupMsg = `El sistema de Appril ya tenía una cita demo registrada con su número.\n\nRevise si le llegó anteriormente un WhatsApp desde un número diferente al de este chat.\n\nSi no lo encuentra, le paso con Mauricio para que se la muestre directamente.`;
+      await sendWA(fromPhone, dupMsg, []);
+      // Registrar el mensaje enviado para que aparezca en el inbox.
+      await sb.from("lead_events").insert({
+        workspace_id:  WORKSPACE_ID,
+        lead_id:       lead.id,
+        event_type:    "wa_agent_reply",
+        event_channel: "whatsapp",
+        event_value:   dupMsg,
+        metadata:      { via: "demo_duplicate" },
+      });
       return;
     }
 
     // Demo nueva confirmada por Appril prod
     const firstName = fullName.split(" ")[0];
-    await sendWA(
-      fromPhone,
-      `Listo, ${firstName}. En unos segundos le va a llegar un WhatsApp desde el número de pacientes de Appril — no desde este chat.\n\nTóquelo como si usted fuera el paciente.`,
-      [],
-    );
+    const introMsg = `Listo, ${firstName}. En unos segundos le va a llegar un WhatsApp desde el número de pacientes de Appril — no desde este chat.\n\nTóquelo como si usted fuera el paciente.`;
+    await sendWA(fromPhone, introMsg, []);
+    // Registrar el mensaje enviado para que aparezca en el inbox.
+    await sb.from("lead_events").insert({
+      workspace_id:  WORKSPACE_ID,
+      lead_id:       lead.id,
+      event_type:    "wa_agent_reply",
+      event_channel: "whatsapp",
+      event_value:   introMsg,
+      metadata:      { via: "demo_intro" },
+    });
   } catch (err) {
     console.error("Demo creation error:", err);
     // No enviamos mensaje al doctor si falló — no prometemos lo que no pudimos hacer

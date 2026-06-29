@@ -46,6 +46,8 @@ const EVENT_META: Record<string, EventMeta> = {
   automation_enrolled:       { label: 'Entró a una automatización',    icon: '⚙️', tone: 'neutral',  category: 'system' },
   automation_converted:      { label: 'Convirtió en la automatización 🏆', icon: '🏆', tone: 'positive', category: 'system' },
   automation_exited:         { label: 'Salió de la automatización',    icon: '⚙️', tone: 'neutral',  category: 'system' },
+  escalated_to_human:        { label: 'Pasado a Mauricio',             icon: '🙋', tone: 'neutral',  category: 'system' },
+  demo_callback_sent:        { label: 'El doctor tocó la demo',        icon: '🎯', tone: 'positive', category: 'system' },
 };
 
 const FALLBACK: EventMeta = { label: '', icon: '·', tone: 'neutral', category: 'system' };
