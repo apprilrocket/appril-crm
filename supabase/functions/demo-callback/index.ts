@@ -9,7 +9,7 @@ const WA_PHONE_ID     = Deno.env.get("WA_PHONE_NUMBER_ID")!;
 const WA_API_VERSION  = Deno.env.get("WA_API_VERSION") ?? "v25.0";
 const WORKSPACE_ID    = "e2096477-fa6a-4b8f-a8b3-bd46ad720167";
 
-const SIGNUP_URL = "https://app.appril.co/auth/sign-up";
+const SIGNUP_URL = "https://www.appril.co/empezar";
 const DEMO_URL   = "https://cal.com/appril/15min";
 
 Deno.serve(async (req) => {
@@ -69,8 +69,9 @@ async function processCallback(payload: any) {
     message =
       `Canceló la cita demo, doctor — y eso también es parte de la experiencia.\n\n` +
       `En este momento su "paciente" ya recibió la notificación de cancelación. Automáticamente. Sin que nadie tuviera que escribirle.\n\n` +
+      `Además su agenda quedó actualizada: usted o su asistente ya pueden citar a otro paciente. Es más, si tiene configurado el reagendamiento, Appril ayuda al propio paciente a buscar otro espacio dentro de su agenda.\n\n` +
       `Eso es lo que Appril hace por su consultorio todos los días.\n\n` +
-      `¿Le comparto el link para empezar sin tarjeta?\n${SIGNUP_URL}`;
+      `Puede probar Appril gratis ahora mismo:\n${SIGNUP_URL}`;
   }
 
   // Enviar WA al doctor
