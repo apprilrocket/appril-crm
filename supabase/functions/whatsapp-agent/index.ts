@@ -62,10 +62,13 @@ Demo viva ya creada: ${ctx.demoAlreadyCreated
       : "SÍ — enviada, debe haber llegado al WhatsApp del doctor, pero aún no la toca."
     : "No"}
 Viene del Diagnóstico de Agenda Blindada: ${ctx.fromDiscovery ? "SÍ" : "No"}
+${ctx.fromDiscovery && ctx.riskTitle ? `Riesgo dominante del diagnóstico: ${ctx.riskTitle}${ctx.riskSummary ? ` — ${ctx.riskSummary}` : ""}` : ""}
+${ctx.fromDiscovery && ctx.recommendedAction ? `Acción que sugirió el diagnóstico: ${ctx.recommendedAction}` : ""}
+${ctx.fromDiscovery ? `Oferta vigente: MES GRATIS de Appril, sin tarjeta. Es tu gancho de cierre — menciónalo cuando cierres, no lo repitas en cada mensaje.` : ""}
 ${ctx.referredByName ? `REFERIDO POR: ${ctx.referredByName} (ya usa Appril)` : "Sin referido"}
 ${ctx.urgency ? `Urgencia: ${ctx.urgency}` : ""}
 ${ctx.maturity ? `Madurez de agenda: ${ctx.maturity}` : ""}
-${ctx.annualLost ? `Pérdida estimada: USD ${ctx.annualLost}/año` : ""}
+${ctx.annualLost ? `Oportunidad estimada (pérdida anual): ${ctx.selectedCurrency ? ctx.selectedCurrency + " " : "USD "}${ctx.annualLost}/año — úsala con tacto ("puede estar perdiendo"), nunca como promesa ni garantía.` : ""}
 ${ctx.desiredNextStep ? `Próximo paso deseado: ${ctx.desiredNextStep}` : ""}
 
 ━━━ APERTURA (messageCount === 0) ━━━
@@ -79,9 +82,15 @@ Prioridad de apertura para el primer mensaje — evalúa en este orden:
     : "no aplica"}
 
 2. VIENE DEL DIAGNÓSTICO (ctx.fromDiscovery o mensaje contiene "hice el Diagnóstico de Agenda Blindada"):
-"Perfecto, doctor/a.
+${ctx.fromDiscovery && ctx.riskTitle
+  ? `YA tienes su diagnóstico. NO re-diagnostiques, NO repitas el informe, NO pidas datos que ya tienes. Abre reconociéndolo y nombrando el riesgo dominante. Algo natural como:
+"Hola${ctx.name !== "Desconocido" ? ` ${ctx.name.split(" ")[0]}` : ""}, vi su diagnóstico. El punto más claro es ${ctx.riskTitle}${ctx.riskSummary ? `: ${ctx.riskSummary}` : ""}.
+La oportunidad no está solo en agendar, sino en lo que pasa antes de que el paciente llegue.
+¿Quiere que le muestre con una demo real cómo lo viviría un paciente por WhatsApp?"
+Máximo UNA pregunta. Luego: insight corto → demo viva → mes gratis o handoff.`
+  : `"Perfecto, doctor/a.
 Entonces ya vio algo importante: una agenda no solo debe estar llena, también debe estar protegida.
-¿Qué fue lo que más le llamó la atención: el dinero que se puede estar escapando, el tiempo administrativo o la tranquilidad que se pierde?"
+¿Qué fue lo que más le llamó la atención: el dinero que se puede estar escapando, el tiempo administrativo o la tranquilidad que se pierde?"`}
 
 3. SOLO SALUDA ("hola", "buenas", o mensaje muy corto):
 Di EXACTAMENTE: "Hola, doctor/a. Soy Appril.
@@ -426,6 +435,40 @@ interface LeadContext {
   demoAlreadyCreated: boolean;
   demoDuplicate: boolean;
   demoOutcome: "confirm" | "cancel" | null;
+  // ── Enriquecimiento Discovery (fromDiscovery) ──
+  discoveryLeadId?: string | null;
+  riskDominant?: string | null;
+  riskTitle?: string | null;
+  riskSummary?: string | null;
+  mainPain?: string | null;
+  recommendedAction?: string | null;
+  selectedCurrency?: string | null;
+  hiddenCostTotal?: number | null;
+  legacyScore?: number | null;
+  primaryCtaKey?: string | null;
+  ctaIntent?: string | null;
+  diagnosisCompletedAt?: string | null;
+  freeMonthOffer: boolean;
+}
+
+// Mapa riesgo dominante (discovery) → copy legible para el lead. Espeja RISK_TITLES
+// del email; el agente lo usa para abrir reconociendo el diagnóstico sin re-diagnosticar.
+const RISK_COPY: Record<string, { title: string; summary: string }> = {
+  no_shows:          { title: "las inasistencias (no-shows)",        summary: "pacientes que no llegan ni avisan y dejan huecos que ya no se alcanzan a llenar" },
+  cancellations:     { title: "las cancelaciones tardías",            summary: "citas que se caen tan sobre la hora que el espacio se pierde" },
+  whatsapp_overload: { title: "el WhatsApp manual",                   summary: "horas al día confirmando y reagendando a mano" },
+  admin_time:        { title: "el tiempo administrativo",             summary: "trabajo de agenda repartido en mensajes y llamadas durante todo el día" },
+  rescheduling:      { title: "el reagendamiento manual",             summary: "mover citas a mano cada vez que algo cambia" },
+};
+function riskCopy(risk?: string | null): { title: string | null; summary: string | null } {
+  if (!risk) return { title: null, summary: null };
+  return RISK_COPY[risk] ?? { title: risk.replace(/_/g, " "), summary: null };
+}
+
+// Validación E.164 estricta — misma regex que submit_discovery_lead / inbox-send.
+const E164_RE = /^\+[1-9][0-9]{7,14}$/;
+function isValidE164(phone: string): boolean {
+  return E164_RE.test(phone);
 }
 
 interface ParsedResponse {
@@ -573,7 +616,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   // Buscar lead — usar limit(1) para evitar error si hay duplicados históricos
   const { data: leads } = await sb
     .from("leads_master")
-    .select("id, full_name, phone, marketing_segment, referred_by_name, agent_paused, whatsapp_opted_in")
+    .select("id, full_name, phone, email, marketing_segment, referred_by_name, agent_paused, whatsapp_opted_in, commercial_intent, cta_intent")
     .or(`phone.eq.${fromPhone},phone.eq.${msg.from}`)
     .order("created_at", { ascending: false })
     .limit(1);
@@ -727,7 +770,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   const [{ data: disc }, { data: demoEvent }, { data: demoOutcomeEvent }] = await Promise.all([
     sb
       .from("discovery_leads")
-      .select("agenda_maturity_level, annual_lost_revenue, marketing_segment, q_urgency, desired_next_step")
+      .select("id, agenda_maturity_level, annual_lost_revenue, hidden_cost_total, marketing_segment, q_urgency, desired_next_step, risk_dominant, main_pain, recommended_action, selected_currency, legacy_lead_score, primary_cta_key, created_at")
       .eq("lead_id", lead.id)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -750,6 +793,8 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
 
   const messageCount = (history ?? []).length;
 
+  const rc = riskCopy(disc?.risk_dominant);
+
   const ctx: LeadContext = {
     name:               lead.full_name ?? "Desconocido",
     phone:              fromPhone,
@@ -766,6 +811,20 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
     demoOutcome:        demoOutcomeEvent?.event_value === "confirm" ? "confirm"
                       : demoOutcomeEvent?.event_value === "cancel"  ? "cancel"
                       : null,
+    // ── Enriquecimiento Discovery ──
+    discoveryLeadId:    disc?.id ?? null,
+    riskDominant:       disc?.risk_dominant ?? null,
+    riskTitle:          rc.title,
+    riskSummary:        rc.summary,
+    mainPain:           disc?.main_pain ?? null,
+    recommendedAction:  disc?.recommended_action ?? null,
+    selectedCurrency:   disc?.selected_currency ?? null,
+    hiddenCostTotal:    disc?.hidden_cost_total ?? null,
+    legacyScore:        disc?.legacy_lead_score ?? null,
+    primaryCtaKey:      disc?.primary_cta_key ?? null,
+    ctaIntent:          lead.cta_intent ?? null,
+    diagnosisCompletedAt: disc?.created_at ?? null,
+    freeMonthOffer:     !!disc,
   };
 
   const messages = buildMessages(history ?? [], userText);
@@ -821,7 +880,17 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
       event_type: "escalated_to_human",
       event_channel: "whatsapp",
       event_value: (handoffName && handoffName !== "Desconocido") ? handoffName : ctx.name,
-      metadata: { to: MAURICIO_WA },
+      metadata: {
+        to:                   MAURICIO_WA,
+        from_discovery:       ctx.fromDiscovery,
+        discovery_lead_id:    ctx.discoveryLeadId ?? null,
+        marketing_segment:    ctx.segment,
+        risk_dominant:        ctx.riskDominant ?? null,
+        cta_intent:           ctx.ctaIntent ?? null,
+        demo_status:          ctx.demoAlreadyCreated ? (ctx.demoOutcome ?? "sent") : "none",
+        opportunity_estimated: ctx.annualLost ?? null,
+        selected_currency:    ctx.selectedCurrency ?? null,
+      },
     });
   }
 }
@@ -891,6 +960,20 @@ function fixSignupUrl(text: string): string {
 
 async function handleDemoCreation(lead: any, fromPhone: string, sb: any) {
   try {
+    // Guard E.164: nunca disparar una ruta WhatsApp con un número malformado.
+    if (!isValidE164(fromPhone)) {
+      console.error(`demo skip: teléfono no E.164 (${fromPhone}) lead ${lead.id}`);
+      await sb.from("lead_events").insert({
+        workspace_id: WORKSPACE_ID,
+        lead_id: lead.id,
+        event_type: "automation_send_skipped",
+        event_channel: "whatsapp",
+        event_value: "demo_create_invalid_e164",
+        metadata: { phone: fromPhone },
+      });
+      return;
+    }
+
     // Usar nombre real si está disponible; evitar "Desconocido" en el endpoint
     const fullName = (!lead.full_name || lead.full_name === "Desconocido")
       ? "Doctor"
@@ -981,19 +1064,29 @@ async function handleDemoCreation(lead: any, fromPhone: string, sb: any) {
 
 function buildMauricioSummary(capturedName: string, disc: any, lastMsg: string, ctx: LeadContext): string {
   const displayName = (capturedName && capturedName !== "Desconocido") ? capturedName : ctx.name;
+  const demoStatus = ctx.demoAlreadyCreated
+    ? (ctx.demoOutcome === "confirm" ? "vivió y CONFIRMÓ"
+      : ctx.demoOutcome === "cancel" ? "vivió y canceló"
+      : ctx.demoDuplicate ? "duplicada (no llegó)"
+      : "enviada, sin tocar aún")
+    : "no creada";
+  const moneda = ctx.selectedCurrency ?? "USD";
   return `🔥 *Lead caliente — Appril*
 
 *Nombre:* ${displayName}
 *Teléfono:* ${ctx.phone}
 *Segmento:* ${ctx.segment}
+${ctx.fromDiscovery ? `*Fuente:* Diagnóstico de Agenda Blindada` : `*Fuente:* WhatsApp directo`}
+${ctx.riskTitle ? `*Riesgo dominante:* ${ctx.riskTitle}` : ""}
 ${ctx.maturity ? `*Madurez agenda:* ${ctx.maturity}` : ""}
 ${ctx.urgency ? `*Urgencia:* ${ctx.urgency}` : ""}
-${ctx.annualLost ? `*Pérdida estimada:* USD ${ctx.annualLost}/año` : ""}
-${disc ? `*Viene del diagnóstico:* Sí` : ""}
+${ctx.annualLost ? `*Oportunidad estimada:* ${moneda} ${ctx.annualLost}/año` : ""}
+${ctx.ctaIntent ? `*CTA clickeado:* ${ctx.ctaIntent}` : ""}
+*Demo viva:* ${demoStatus}
 
 *Último mensaje:* "${lastMsg}"
 
-*Próximo paso:* Conectar con el profesional para aterrizarlo a su caso.`;
+*Próximo paso:* Conectar con el profesional para aterrizarlo a su caso.${ctx.fromDiscovery ? " No repetir el diagnóstico — ya lo vio." : ""}`;
 }
 
 // ── Enviar WhatsApp ──────────────────────────────────────────────────────────
