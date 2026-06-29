@@ -14,7 +14,13 @@ import { SESv2Client, SendEmailCommand } from "https://esm.sh/@aws-sdk/client-se
 // ── Config / entorno ───────────────────────────────────────────────────────────
 const FROM_EMAIL = Deno.env.get("DISCOVERY_FROM_EMAIL") ?? "Appril <diagnostico@appril.co>";
 // CTA destino (configurable por env); se le agregan los UTM del lead.
-const CTA_BASE_URL = Deno.env.get("DISCOVERY_CTA_URL") ?? "https://app.appril.co/auth/sign-up";
+// Link de registro OFICIAL (no app.appril.co/auth/sign-up, que es el heredado).
+const CTA_BASE_URL = Deno.env.get("DISCOVERY_CTA_URL") ?? "https://www.appril.co/empezar";
+
+// CTA a WhatsApp → despierta al whatsapp-agent con contexto de Discovery.
+const AGENT_WA_NUMBER = (Deno.env.get("DISCOVERY_AGENT_WA_NUMBER") ?? "573112211772").replace(/\D/g, "");
+const WA_CTA_MESSAGE = "Hola, recibí mi diagnóstico de Appril y quiero activar mi mes gratis.";
+const WA_CTA_LABEL = "Activar mi mes gratis por WhatsApp";
 
 const SUBJECT = "Tu diagnóstico de agenda está listo";
 const PREHEADER =
@@ -163,6 +169,8 @@ type EmailModel = {
   hiddenCost: string;
   ctaUrl: string;
   ctaLabel: string;
+  waUrl: string;
+  waLabel: string;
 };
 
 function renderHtml(m: EmailModel): string {
@@ -283,6 +291,16 @@ function renderHtml(m: EmailModel): string {
                   <!--[if !mso]><!-- -->
                   <a href="${escapeHtml(m.ctaUrl)}" target="_blank" style="display:inline-block;background-color:#0ea5e9;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:8px;">${escapeHtml(m.ctaLabel)}</a>
                   <!--<![endif]-->
+                  <p style="margin:16px 0 8px;font-size:13px;color:#cbd5e1;line-height:1.5;">o, si prefiere, lo activamos juntos por WhatsApp:</p>
+                  <!--[if mso]>
+                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(m.waUrl)}" style="height:46px;v-text-anchor:middle;width:300px;" arcsize="14%" stroke="f" fillcolor="#25D366">
+                  <w:anchorlock/>
+                  <center style="color:#0b3d2e;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">${escapeHtml(m.waLabel)}</center>
+                  </v:roundrect>
+                  <![endif]-->
+                  <!--[if !mso]><!-- -->
+                  <a href="${escapeHtml(m.waUrl)}" target="_blank" style="display:inline-block;background-color:#25D366;color:#0b3d2e;font-size:15px;font-weight:700;text-decoration:none;padding:13px 30px;border-radius:8px;">${escapeHtml(m.waLabel)}</a>
+                  <!--<![endif]-->
                 </td>
               </tr>
             </table>
@@ -326,6 +344,9 @@ function renderText(m: EmailModel): string {
     ``,
     `Prueba Appril 1 mes gratis (sin tarjeta):`,
     m.ctaUrl,
+    ``,
+    `O actívalo por WhatsApp:`,
+    m.waUrl,
   ].join("\n");
 }
 
@@ -375,7 +396,7 @@ Deno.serve(async (req: Request) => {
     // Solo columnas que EXISTEN en public.discovery_leads (verificado contra schema.sql).
     // El CTA label / recommended_action viven en frontend_calculations/findings (jsonb),
     // no como columnas dedicadas todavía.
-    const { data: dl, error: dlErr } = await sb
+    const { data: dlRaw, error: dlErr } = await sb
       .from("discovery_leads")
       .select(
         "id, workspace_id, lead_id, full_name, email, city, " +
@@ -385,6 +406,10 @@ Deno.serve(async (req: Request) => {
       )
       .eq("id", discoveryLeadId)
       .single();
+
+    // supabase-js tipa el resultado de .single() como union con GenericStringError;
+    // ya validamos error/null abajo, así que trabajamos con un shape laxo.
+    const dl = dlRaw as Record<string, any> | null;
 
     if (dlErr || !dl) {
       // No logueamos PII; el id no es sensible.
@@ -484,6 +509,8 @@ Deno.serve(async (req: Request) => {
       hiddenCost: fmtMoney(usdHiddenCost, fx, symbol, selectedCode),
       ctaUrl,
       ctaLabel,
+      waUrl: `https://wa.me/${AGENT_WA_NUMBER}?text=${encodeURIComponent(WA_CTA_MESSAGE)}`,
+      waLabel: WA_CTA_LABEL,
     };
 
     const html = renderHtml(model);
