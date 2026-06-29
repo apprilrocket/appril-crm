@@ -766,7 +766,19 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   // el mensaje queda registrado para el inbox, pero el agente IA no responde.
   if (lead.agent_paused) return;
 
-  // Datos de discovery, demo y resultado de la demo en paralelo
+  // Cooldown de demo: una demo "ya creada" solo bloquea una nueva DENTRO de esta
+  // ventana. Fuera del cooldown, una petición explícita del doctor genera una demo
+  // fresca (los doctores vuelven; pedir la demo de nuevo NO es spam, es solicitud).
+  // Configurable en app_config.demo_cooldown_hours (default 24h, alineado con que la
+  // demo agenda "mañana" → al día siguiente el cupo es otro y prod no deduplica).
+  const { data: cooldownCfg } = await sb
+    .from("app_config").select("value").eq("key", "demo_cooldown_hours").maybeSingle();
+  const demoCooldownHours = Number(cooldownCfg?.value) || 24;
+  const demoCutoff = new Date(Date.now() - demoCooldownHours * 3600_000).toISOString();
+
+  // Datos de discovery, demo y resultado de la demo en paralelo.
+  // demo_created / demo_callback_sent se acotan al cooldown: una demo vieja (fuera de
+  // la ventana) NO cuenta como "ya creada" → el agente puede ofrecer/crear una nueva.
   const [{ data: disc }, { data: demoEvent }, { data: demoOutcomeEvent }] = await Promise.all([
     sb
       .from("discovery_leads")
@@ -780,12 +792,16 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
       .select("id, event_value")
       .eq("lead_id", lead.id)
       .eq("event_type", "demo_created")
+      .gte("created_at", demoCutoff)
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle(),
     sb
       .from("lead_events")
       .select("event_value")
       .eq("lead_id", lead.id)
       .eq("event_type", "demo_callback_sent")
+      .gte("created_at", demoCutoff)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
