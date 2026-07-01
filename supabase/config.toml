@@ -401,6 +401,10 @@ verify_jwt = false
 [functions.email-unsubscribe]
 verify_jwt = false
 
+# signup-callback es público (lo invoca el signup de app.appril.co con el token opaco dl).
+[functions.signup-callback]
+verify_jwt = false
+
 # inbox-send se invoca desde el dashboard con el JWT del usuario → mantener verify.
 [functions.inbox-send]
 verify_jwt = true

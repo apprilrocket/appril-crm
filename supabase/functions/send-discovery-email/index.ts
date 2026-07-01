@@ -145,7 +145,11 @@ function fmtHours(h: number): string {
   return `${rounded.toLocaleString("es-CO")} h`;
 }
 
-function buildCtaUrl(base: string, utm: Record<string, string | null | undefined>): string {
+function buildCtaUrl(
+  base: string,
+  utm: Record<string, string | null | undefined>,
+  dlToken?: string | null,
+): string {
   let url: URL;
   try {
     url = new URL(base);
@@ -159,6 +163,9 @@ function buildCtaUrl(base: string, utm: Record<string, string | null | undefined
   }
   if (!url.searchParams.has("utm_source")) url.searchParams.set("utm_source", "discovery_email");
   if (!url.searchParams.has("utm_medium")) url.searchParams.set("utm_medium", "email");
+  // Atribución lead→cuenta: el token opaco `dl` (leads_master.dl_token) viaja hasta el
+  // signup para poder cerrar el loop account_created→CRM sin exponer lead_id crudo.
+  if (dlToken) url.searchParams.set("dl", dlToken);
   return url.toString();
 }
 
@@ -518,13 +525,24 @@ Deno.serve(async (req: Request) => {
           CTA_LABEL_DEFAULT,
       ).trim() || CTA_LABEL_DEFAULT;
 
+    // Token opaco de atribución del lead (puede no existir si el discovery no resolvió lead).
+    let dlToken: string | null = null;
+    if (dl.lead_id) {
+      const { data: lm } = await sb
+        .from("leads_master")
+        .select("dl_token")
+        .eq("id", dl.lead_id)
+        .maybeSingle();
+      dlToken = (lm as any)?.dl_token ?? null;
+    }
+
     const ctaUrl = buildCtaUrl(CTA_BASE_URL, {
       utm_source: dl.utm_source,
       utm_medium: dl.utm_medium,
       utm_campaign: dl.utm_campaign,
       utm_content: dl.utm_content,
       utm_term: dl.utm_term,
-    });
+    }, dlToken);
 
     // Costo oculto: condiciona el preheader y el bloque destacado (no inventar $0).
     const hiddenCostStr = fmtMoney(usdHiddenCost, fx, symbol, selectedCode);
