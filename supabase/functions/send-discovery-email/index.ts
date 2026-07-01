@@ -12,7 +12,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SESv2Client, SendEmailCommand } from "https://esm.sh/@aws-sdk/client-sesv2@3";
 
 // ── Config / entorno ───────────────────────────────────────────────────────────
-const FROM_EMAIL = Deno.env.get("DISCOVERY_FROM_EMAIL") ?? "Appril <diagnostico@appril.co>";
+// Remitente unificado: todo Appril sale de hola@appril.co (envía y recibe).
+const FROM_EMAIL = Deno.env.get("DISCOVERY_FROM_EMAIL") ?? "Appril <hola@appril.co>";
 // CTA destino (configurable por env); se le agregan los UTM del lead.
 // Link de registro OFICIAL (no app.appril.co/auth/sign-up, que es el heredado).
 const CTA_BASE_URL = Deno.env.get("DISCOVERY_CTA_URL") ?? "https://www.appril.co/empezar";
@@ -22,10 +23,13 @@ const AGENT_WA_NUMBER = (Deno.env.get("DISCOVERY_AGENT_WA_NUMBER") ?? "573112211
 const WA_CTA_MESSAGE = "Hola, recibí mi diagnóstico de Appril y quiero activar mi mes gratis.";
 const WA_CTA_LABEL = "Activar mi mes gratis por WhatsApp";
 
-const SUBJECT = "Tu diagnóstico de agenda está listo";
-const PREHEADER =
-  "Detectamos dónde se te pueden estar escapando confirmaciones, cancelaciones, tiempo y espacios.";
-const CTA_LABEL_DEFAULT = "Activar mi mes gratis de Appril";
+const SUBJECT = "Su diagnóstico está listo";
+// Preheader dinámico: si hay costo oculto se arma con la cifra (en el handler);
+// si no, este fallback.
+const PREHEADER_FALLBACK =
+  "Vea dónde se le están escapando dinero, tiempo y oportunidades.";
+// CTA secundario (crear cuenta). El CTA PRINCIPAL post-Discovery es WhatsApp.
+const CTA_LABEL_DEFAULT = "Crear cuenta sin tarjeta";
 
 // Secretos aceptados para autorizar la invocación. El disparador pg_net manda el
 // secret tanto en `Authorization: Bearer <secret>` como en `x-discovery-dispatch-secret`
@@ -92,7 +96,8 @@ const RISK_TITLE_FALLBACK = "La principal oportunidad de tu agenda";
 // ── Helpers de formato ───────────────────────────────────────────────────────────
 function firstName(full?: string | null): string {
   const n = (full ?? "").trim();
-  if (!n) return "Hola";
+  // Fallback de saludo alineado con lead_var_value(_, 'nombre') del CRM.
+  if (!n) return "Doctor(a)";
   return n.split(/\s+/)[0];
 }
 
@@ -162,6 +167,8 @@ function buildCtaUrl(base: string, utm: Record<string, string | null | undefined
 // renderText usa los valores crudos. NUNCA pre-escapar al construir el modelo.
 type EmailModel = {
   name: string;
+  preheader: string;
+  hiddenCostKnown: boolean;
   riskTitle: string;
   evidence: string;
   lostRevenue: string;
@@ -174,7 +181,7 @@ type EmailModel = {
 };
 
 function renderHtml(m: EmailModel): string {
-  const pre = escapeHtml(PREHEADER);
+  const pre = escapeHtml(m.preheader);
   return `<!DOCTYPE html>
 <html lang="es" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
@@ -205,17 +212,28 @@ function renderHtml(m: EmailModel): string {
         <tr>
           <td style="padding:32px 32px 8px;">
             <p style="margin:0 0 6px;font-size:15px;color:#475569;line-height:1.6;">Hola, ${escapeHtml(m.name)} 👋</p>
-            <h1 style="margin:0 0 12px;font-size:23px;line-height:1.3;color:#0f172a;font-weight:700;">Tu diagnóstico de agenda está listo</h1>
-            <p style="margin:0;font-size:15px;color:#475569;line-height:1.6;">Analizamos tus respuestas y detectamos dónde se te pueden estar escapando confirmaciones, cancelaciones, tiempo y espacios.</p>
+            <h1 style="margin:0 0 12px;font-size:23px;line-height:1.3;color:#0f172a;font-weight:700;">Su diagnóstico está listo</h1>
+            <p style="margin:0;font-size:15px;color:#475569;line-height:1.6;">Gracias por completar el diagnóstico. Esto es lo que encontramos.</p>
           </td>
         </tr>
-        <!-- Oportunidad principal -->
+        ${m.hiddenCostKnown ? `<!-- Oportunidad estimada (solo si hay costo oculto) -->
+        <tr>
+          <td style="padding:24px 32px 0;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0f172a;border-radius:10px;">
+              <tr><td align="center" style="padding:26px 24px;">
+                <p style="margin:0 0 6px;font-size:13px;color:#cbd5e1;line-height:1.4;">Oportunidad estimada al año</p>
+                <p style="margin:0;font-size:32px;font-weight:800;color:#ffffff;line-height:1.1;">${escapeHtml(m.hiddenCost)}</p>
+              </td></tr>
+            </table>
+          </td>
+        </tr>` : ""}
+        <!-- Bloque 1: El punto más importante -->
         <tr>
           <td style="padding:24px 32px 8px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f9ff;border-left:4px solid #0ea5e9;border-radius:8px;">
               <tr>
                 <td style="padding:18px 20px;">
-                  <p style="margin:0 0 6px;font-size:12px;letter-spacing:0.6px;text-transform:uppercase;color:#0369a1;font-weight:700;">Tu principal oportunidad</p>
+                  <p style="margin:0 0 6px;font-size:12px;letter-spacing:0.6px;text-transform:uppercase;color:#0369a1;font-weight:700;">El punto más importante</p>
                   <p style="margin:0 0 8px;font-size:18px;line-height:1.4;color:#0f172a;font-weight:700;">${escapeHtml(m.riskTitle)}</p>
                   ${m.evidence ? `<p style="margin:0;font-size:14px;color:#334155;line-height:1.6;">${escapeHtml(m.evidence)}</p>` : ""}
                 </td>
@@ -223,10 +241,17 @@ function renderHtml(m: EmailModel): string {
             </table>
           </td>
         </tr>
-        <!-- Impacto estimado: 3 cifras -->
+        <!-- Bloque 2: Qué significa -->
+        <tr>
+          <td style="padding:20px 32px 8px;">
+            <p style="margin:0 0 8px;font-size:16px;font-weight:700;color:#0f172a;">Qué significa</p>
+            <p style="margin:0;font-size:14px;color:#334155;line-height:1.6;">Su consultorio puede estar perdiendo dinero antes de que el paciente llegue: en confirmaciones pendientes, cancelaciones tarde, tiempo de WhatsApp o espacios que no se recuperan.</p>
+          </td>
+        </tr>
+        <!-- Bloque 3: Impacto estimado: 3 cifras -->
         <tr>
           <td style="padding:24px 32px 8px;">
-            <p style="margin:0 0 14px;font-size:12px;letter-spacing:0.6px;text-transform:uppercase;color:#64748b;font-weight:700;">Impacto estimado al año</p>
+            <p style="margin:0 0 14px;font-size:12px;letter-spacing:0.6px;text-transform:uppercase;color:#64748b;font-weight:700;">Impacto estimado</p>
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td width="33%" valign="top" style="padding:0 6px 0 0;">
@@ -241,7 +266,7 @@ function renderHtml(m: EmailModel): string {
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fffbeb;border-radius:8px;">
                     <tr><td align="center" style="padding:16px 8px;">
                       <p style="margin:0 0 4px;font-size:18px;font-weight:700;color:#b45309;line-height:1.2;">${escapeHtml(m.adminHours)}</p>
-                      <p style="margin:0;font-size:12px;color:#78350f;line-height:1.4;">Horas administrativas / año</p>
+                      <p style="margin:0;font-size:12px;color:#78350f;line-height:1.4;">Horas administrativas estimadas</p>
                     </td></tr>
                   </table>
                 </td>
@@ -260,47 +285,38 @@ function renderHtml(m: EmailModel): string {
         <!-- Disclaimer -->
         <tr>
           <td style="padding:12px 32px 8px;">
-            <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.5;font-style:italic;">Son estimaciones basadas en tus respuestas, no una promesa de ahorro. Tu resultado real depende de tu operación.</p>
+            <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.5;font-style:italic;">Estas cifras son estimaciones basadas en sus respuestas. No son una promesa de ahorro.</p>
           </td>
         </tr>
-        <!-- Cómo ayuda Appril -->
+        <!-- Bloque 4: Cómo puede ayudar Appril -->
         <tr>
           <td style="padding:20px 32px 8px;">
-            <p style="margin:0 0 12px;font-size:16px;font-weight:700;color:#0f172a;">Cómo te ayuda Appril</p>
+            <p style="margin:0 0 12px;font-size:16px;font-weight:700;color:#0f172a;">Cómo puede ayudar Appril</p>
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-              <tr><td style="padding:0 0 10px;font-size:14px;color:#334155;line-height:1.6;">✅ <strong>Confirmaciones automáticas</strong> por WhatsApp para reducir ausencias y cancelaciones de último momento.</td></tr>
-              <tr><td style="padding:0 0 10px;font-size:14px;color:#334155;line-height:1.6;">✅ <strong>Agenda centralizada</strong> que llena espacios vacíos y evita el doble agendamiento.</td></tr>
-              <tr><td style="padding:0 0 4px;font-size:14px;color:#334155;line-height:1.6;">✅ <strong>Menos trabajo manual</strong>: recuperas horas administrativas cada semana.</td></tr>
+              <tr><td style="padding:0 0 10px;font-size:14px;color:#334155;line-height:1.6;">✅ Sus pacientes pueden confirmar, cancelar o reagendar con más claridad.</td></tr>
+              <tr><td style="padding:0 0 10px;font-size:14px;color:#334155;line-height:1.6;">✅ Su consultorio deja de perseguir paciente por paciente.</td></tr>
+              <tr><td style="padding:0 0 4px;font-size:14px;color:#334155;line-height:1.6;">✅ Usted puede ver quién confirmó, quién sigue pendiente y qué espacios requieren acción.</td></tr>
             </table>
           </td>
         </tr>
-        <!-- Oferta + CTA -->
+        <!-- Bloque 5: Active su mes gratis (CTA principal = WhatsApp, secundario = registro) -->
         <tr>
           <td style="padding:20px 32px 8px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0f172a;border-radius:10px;">
               <tr>
                 <td align="center" style="padding:28px 24px;">
-                  <p style="margin:0 0 6px;font-size:18px;font-weight:700;color:#ffffff;line-height:1.4;">Prueba Appril 1 mes gratis</p>
-                  <p style="margin:0 0 20px;font-size:14px;color:#cbd5e1;line-height:1.6;">Sin tarjeta. Configúralo hoy y empieza a recuperar tu agenda.</p>
+                  <p style="margin:0 0 6px;font-size:18px;font-weight:700;color:#ffffff;line-height:1.4;">Active su mes gratis</p>
+                  <p style="margin:0 0 20px;font-size:14px;color:#cbd5e1;line-height:1.6;">Por haber hecho el diagnóstico, puede probar Appril sin tarjeta.</p>
                   <!--[if mso]>
-                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(m.ctaUrl)}" style="height:48px;v-text-anchor:middle;width:300px;" arcsize="14%" stroke="f" fillcolor="#0ea5e9">
-                  <w:anchorlock/>
-                  <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">${escapeHtml(m.ctaLabel)}</center>
-                  </v:roundrect>
-                  <![endif]-->
-                  <!--[if !mso]><!-- -->
-                  <a href="${escapeHtml(m.ctaUrl)}" target="_blank" style="display:inline-block;background-color:#0ea5e9;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:8px;">${escapeHtml(m.ctaLabel)}</a>
-                  <!--<![endif]-->
-                  <p style="margin:16px 0 8px;font-size:13px;color:#cbd5e1;line-height:1.5;">o, si prefiere, lo activamos juntos por WhatsApp:</p>
-                  <!--[if mso]>
-                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(m.waUrl)}" style="height:46px;v-text-anchor:middle;width:300px;" arcsize="14%" stroke="f" fillcolor="#25D366">
+                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escapeHtml(m.waUrl)}" style="height:48px;v-text-anchor:middle;width:320px;" arcsize="14%" stroke="f" fillcolor="#25D366">
                   <w:anchorlock/>
                   <center style="color:#0b3d2e;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">${escapeHtml(m.waLabel)}</center>
                   </v:roundrect>
                   <![endif]-->
                   <!--[if !mso]><!-- -->
-                  <a href="${escapeHtml(m.waUrl)}" target="_blank" style="display:inline-block;background-color:#25D366;color:#0b3d2e;font-size:15px;font-weight:700;text-decoration:none;padding:13px 30px;border-radius:8px;">${escapeHtml(m.waLabel)}</a>
+                  <a href="${escapeHtml(m.waUrl)}" target="_blank" style="display:inline-block;background-color:#25D366;color:#0b3d2e;font-size:15px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:8px;">${escapeHtml(m.waLabel)}</a>
                   <!--<![endif]-->
+                  <p style="margin:16px 0 0;font-size:13px;line-height:1.5;"><a href="${escapeHtml(m.ctaUrl)}" target="_blank" style="color:#cbd5e1;text-decoration:underline;">${escapeHtml(m.ctaLabel)}</a></p>
                 </td>
               </tr>
             </table>
@@ -309,7 +325,7 @@ function renderHtml(m: EmailModel): string {
         <!-- Footer -->
         <tr>
           <td style="padding:24px 32px 32px;">
-            <p style="margin:0 0 4px;font-size:12px;color:#94a3b8;line-height:1.5;">Recibiste este correo porque completaste el diagnóstico de agenda de Appril.</p>
+            <p style="margin:0 0 4px;font-size:12px;color:#94a3b8;line-height:1.5;">Recibió este correo porque completó el diagnóstico de Appril.</p>
             <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.5;">Appril · <a href="https://appril.co" style="color:#64748b;text-decoration:underline;">appril.co</a></p>
           </td>
         </tr>
@@ -325,29 +341,40 @@ function renderText(m: EmailModel): string {
   return [
     `Hola, ${m.name}`,
     ``,
-    `Tu diagnóstico de agenda está listo.`,
+    `Su diagnóstico está listo.`,
     ``,
-    `Tu principal oportunidad: ${m.riskTitle}`,
+    m.hiddenCostKnown ? `Encontramos una oportunidad estimada de ${m.hiddenCost} al año.` : null,
+    m.hiddenCostKnown ? `` : null,
+    `El punto más importante:`,
+    m.riskTitle,
+    ``,
     m.evidence ? m.evidence : ``,
+    ``,
+    `Qué significa:`,
+    `Su consultorio puede estar perdiendo dinero antes de que el paciente llegue: en confirmaciones pendientes, cancelaciones tarde, tiempo de WhatsApp o espacios que no se recuperan.`,
     ``,
     `Impacto estimado al año:`,
     `- Pérdida anual estimada: ${m.lostRevenue}`,
-    `- Horas administrativas / año: ${m.adminHours}`,
+    `- Horas administrativas estimadas: ${m.adminHours}`,
     `- Costo oculto total: ${m.hiddenCost}`,
     ``,
-    `Son estimaciones basadas en tus respuestas, no una promesa de ahorro.`,
+    `Estas cifras son estimaciones basadas en sus respuestas. No son una promesa de ahorro.`,
     ``,
-    `Cómo te ayuda Appril:`,
-    `- Confirmaciones automáticas por WhatsApp para reducir ausencias.`,
-    `- Agenda centralizada que llena espacios vacíos.`,
-    `- Menos trabajo manual: recuperas horas cada semana.`,
+    `Cómo puede ayudar Appril:`,
+    `- Sus pacientes pueden confirmar, cancelar o reagendar con más claridad.`,
+    `- Su consultorio deja de perseguir paciente por paciente.`,
+    `- Usted puede ver quién confirmó, quién sigue pendiente y qué espacios requieren acción.`,
     ``,
-    `Prueba Appril 1 mes gratis (sin tarjeta):`,
+    `Por haber hecho el diagnóstico, puede activar un mes gratis de Appril.`,
+    ``,
+    `Activar mi mes gratis por WhatsApp:`,
+    m.waUrl,
+    ``,
+    `Crear cuenta sin tarjeta:`,
     m.ctaUrl,
     ``,
-    `O actívalo por WhatsApp:`,
-    m.waUrl,
-  ].join("\n");
+    `Appril`,
+  ].filter((l) => l !== null).join("\n");
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────────────
@@ -499,14 +526,23 @@ Deno.serve(async (req: Request) => {
       utm_term: dl.utm_term,
     });
 
+    // Costo oculto: condiciona el preheader y el bloque destacado (no inventar $0).
+    const hiddenCostStr = fmtMoney(usdHiddenCost, fx, symbol, selectedCode);
+    const hiddenCostKnown = usdHiddenCost > 0;
+    const preheader = hiddenCostKnown
+      ? `Tiene una oportunidad estimada de ${hiddenCostStr} al año.`
+      : PREHEADER_FALLBACK;
+
     // Modelo con valores CRUDOS (renderHtml escapa; renderText usa crudo).
     const model: EmailModel = {
       name: firstName(dl.full_name),
+      preheader,
+      hiddenCostKnown,
       riskTitle,
       evidence,
       lostRevenue: fmtMoney(usdLostRevenue, fx, symbol, selectedCode),
       adminHours: fmtHours(annualAdminHours),
-      hiddenCost: fmtMoney(usdHiddenCost, fx, symbol, selectedCode),
+      hiddenCost: hiddenCostStr,
       ctaUrl,
       ctaLabel,
       waUrl: `https://wa.me/${AGENT_WA_NUMBER}?text=${encodeURIComponent(WA_CTA_MESSAGE)}`,

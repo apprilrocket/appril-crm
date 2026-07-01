@@ -397,6 +397,10 @@ verify_jwt = false
 [functions.send-discovery-email]
 verify_jwt = false
 
+# email-unsubscribe es público (lo invoca el cliente de correo vía List-Unsubscribe one-click).
+[functions.email-unsubscribe]
+verify_jwt = false
+
 # inbox-send se invoca desde el dashboard con el JWT del usuario → mantener verify.
 [functions.inbox-send]
 verify_jwt = true

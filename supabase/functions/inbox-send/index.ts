@@ -12,7 +12,8 @@ import { SESv2Client, SendEmailCommand } from "https://esm.sh/@aws-sdk/client-se
 const WA_ACCESS_TOKEN = Deno.env.get("WA_ACCESS_TOKEN")!;
 const WA_PHONE_ID = Deno.env.get("WA_PHONE_NUMBER_ID")!;
 const WA_API_VERSION = Deno.env.get("WA_API_VERSION") ?? "v25.0";
-const FROM_EMAIL = Deno.env.get("INBOX_FROM_EMAIL") ?? "Appril <diagnostico@appril.co>";
+// Remitente unificado: todo Appril sale de hola@appril.co (envía y recibe).
+const FROM_EMAIL = Deno.env.get("INBOX_FROM_EMAIL") ?? "Appril <hola@appril.co>";
 // Workspace que puede usar las credenciales env como fallback (Appril).
 // Otros workspaces deben tener su integración configurada — anti-fuga entre tenants.
 const DEFAULT_WORKSPACE_ID = Deno.env.get("DEFAULT_WORKSPACE_ID") ?? "";

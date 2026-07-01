@@ -50,10 +50,12 @@ export async function createCampaign(args: {
 
   // El lanzamiento hidrata full_name y nombre (ver crm_launch_campaign). Avisa si
   // el template pide otras variables → saldrían vacías en el envío.
-  const SUPPORTED = new Set(["full_name", "nombre"]);
+  // crm_launch_campaign hidrata estas claves en el payload de message_queue.
+  // discovery_url / unsubscribe_url se agregaron en 20260629_1800_discovery_email_rewrite.sql.
+  const SUPPORTED = new Set(["full_name", "nombre", "discovery_url", "unsubscribe_url"]);
   const unsupported = (Array.isArray(tpl.variables) ? (tpl.variables as string[]) : []).filter((v) => !SUPPORTED.has(v));
   const warning = unsupported.length
-    ? `El template usa variables no hidratadas por el lanzamiento: ${unsupported.join(", ")}. Saldrían vacías. El lanzamiento sólo hidrata full_name y nombre.`
+    ? `El template usa variables no hidratadas por el lanzamiento: ${unsupported.join(", ")}. Saldrían vacías. El lanzamiento sólo hidrata full_name, nombre, discovery_url y unsubscribe_url.`
     : undefined;
 
   const segment_filter: Record<string, unknown> = {};
