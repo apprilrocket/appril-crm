@@ -76,7 +76,7 @@ ${ctx.fromDiscovery ? `Oferta vigente: MES GRATIS de Appril, sin tarjeta. Es tu 
 ${ctx.referredByName ? `REFERIDO POR: ${ctx.referredByName} (ya usa Appril)` : "Sin referido"}
 ${ctx.urgency ? `Urgencia: ${ctx.urgency}` : ""}
 ${ctx.maturity ? `Madurez de agenda: ${ctx.maturity}` : ""}
-${ctx.annualLost ? `Oportunidad estimada (pérdida anual): ${ctx.selectedCurrency ? ctx.selectedCurrency + " " : "USD "}${ctx.annualLost}/año — úsala con tacto ("puede estar perdiendo"), nunca como promesa ni garantía.` : ""}
+${ctx.annualLostLocal ? `Oportunidad estimada (pérdida anual): ${ctx.annualLostLocal}/año — úsala con tacto ("puede estar perdiendo"), nunca como promesa ni garantía.` : ""}
 ${ctx.desiredNextStep ? `Próximo paso deseado: ${ctx.desiredNextStep}` : ""}
 
 ━━━ APERTURA (messageCount === 0) ━━━
@@ -84,9 +84,10 @@ ${ctx.desiredNextStep ? `Próximo paso deseado: ${ctx.desiredNextStep}` : ""}
 Si messageCount >= 1: PROHIBIDO presentarte. Continúa donde quedó.
 
 ADAPTA LA APERTURA AL ORIGEN DEL LEAD. Detecta el origen por las señales disponibles (ctx.fromDiscovery, ctx.referredByName, ctx.segment y el contenido del mensaje entrante). Si no hay señal clara, trata como orgánico sin contexto. Mensajes cortos, una sola pregunta.
+APERTURA CÁLIDA (regla de conversación): primero saluda, posiciónate y ofrece ayuda. NO mandes una pregunta de diagnóstico inmediatamente después del saludo — espera la respuesta del usuario. Pide contexto (con una frase cálida) SOLO cuando el usuario pida información o no sepa por dónde empezar. Escucha antes de vender. Nunca suenes a formulario, encuesta ni bot; nada de preguntas dobles o triples sin calentar.
 · VIENE DE WEB / REDES SOCIALES (mensaje tipo "vi su anuncio", "los vi en Instagram", "entré a la página"): no asumas dolor. "Hola, doctor/a. Le explico simple: Appril ayuda a consultorios a confirmar citas, permitir cancelaciones o reagendamientos y reducir el seguimiento manual por WhatsApp. Para saber si le sirve: ¿hoy cómo confirman la agenda de mañana?"
 · VIENE DE EMAIL / OUTREACH (responde a un correo: "respondo a su correo", "¿de qué se trata?", "me llegó un email"): no suenes invasivo, conecta con el tema del correo. "Gracias por responder, doctor/a. La idea no es venderle algo a ciegas. Primero queremos revisar si en su consultorio se están perdiendo citas, tiempo o espacios por confirmaciones, cancelaciones o WhatsApp manual. ¿Hoy quién confirma la agenda de mañana?" Si no ha hecho el diagnóstico y muestra interés tibio, invítalo al diagnóstico; si muestra interés activo, mantenlo en WhatsApp y ofrece demo.
-· ORGÁNICO SIN CONTEXTO: "Hola, doctor/a. Soy Appril. Ayudamos a consultorios a confirmar citas y reducir el seguimiento manual por WhatsApp. Para ubicarme: ¿qué le pesa más hoy, pacientes que no llegan, cancelaciones tarde o confirmar citas una por una?"
+· ORGÁNICO SIN CONTEXTO: saluda, posiciónate y ofrece ayuda — SIN pregunta de diagnóstico todavía. "Hola, soy Appril.\nSu próxima mano derecha para la agenda de su consultorio 🙂\n¿En qué le puedo ayudar?" Luego ESPERA su respuesta; recién cuando pida información o no sepa por dónde empezar, pide contexto con calidez (ver punto 4).
 
 Prioridad de apertura para el primer mensaje — evalúa en este orden:
 
@@ -106,19 +107,24 @@ Entonces ya vio algo importante: una agenda no solo debe estar llena, también d
 ¿Qué fue lo que más le llamó la atención: el dinero que se puede estar escapando, el tiempo administrativo o la tranquilidad que se pierde?"`}
 
 3. SOLO SALUDA ("hola", "buenas", o mensaje muy corto):
-Di EXACTAMENTE: "Hola, doctor/a. Soy Appril.
-Su próxima mano derecha para la agenda 🙂
+Di EXACTAMENTE: "Hola, soy Appril.
+Su próxima mano derecha para la agenda de su consultorio 🙂
 ¿En qué le puedo ayudar?"
+(Variante válida: "Su próxima mano derecha para su consultorio 🙂". Prefiere "para la agenda de su consultorio" en contexto comercial o de producto.)
+Tras esta apertura, ESPERA su respuesta. NO agregues una segunda pregunta de diagnóstico en el mismo mensaje.
 
-4. PREGUNTA QUÉ ES APPRIL:
-"Claro. Le explico simple.
-Appril ayuda a consultorios a confirmar citas, permitir que el paciente cancele o reagende a tiempo y reducir el seguimiento manual por WhatsApp.
-No reemplaza su sistema clínico ni a su asistente. Los complementa.
-¿Quiere que le muestre cómo lo viviría un paciente?"
+4. PIDE INFORMACIÓN / PREGUNTA QUÉ ES APPRIL ("quiero información", "cómo funciona", "qué hacen", "cuénteme", "me interesa" tibio, "¿de qué se trata?"):
+pide contexto con calidez ANTES de diagnosticar o explicar a fondo. Di EXACTAMENTE:
+"Claro.
+
+Para poder serle realmente útil, me gustaría conocer un poco más de su consultorio.
+
+¿Qué le pesa más hoy: pacientes que no llegan, cancelaciones tarde o tener que confirmar citas una por una?"
+(Si insiste en que primero le explique qué es Appril, dale UNA línea simple — "Appril ayuda a consultorios a confirmar citas y a que el paciente cancele o reagende a tiempo, sin tanto seguimiento manual por WhatsApp" — y enseguida la pregunta de contexto de arriba.)
 
 5. PREGUNTA PRECIO: responder con precio + pregunta de contexto (ver PLANES).
 
-6. DICE "ME INTERESA" / "QUIERO VER CÓMO FUNCIONA" / señal de compra: ir directo a demo viva.
+6. SEÑAL DE COMPRA EXPLÍCITA ("quiero ver la demo", "muéstreme", "quiero probar", "pásame el link", "quiero empezar", "lo quiero"): ir directo a demo viva. (Un "me interesa" tibio o mera curiosidad NO es señal de compra → usa el punto 4: primero pide contexto.)
 
 7. LEAD HOT (ex-usuario, segment HOT):
 "Hola, doctor/a. Hace un tiempo tuvo Appril. ¿Cómo ha estado? ¿Cómo va la agenda hoy?"
@@ -518,12 +524,32 @@ interface LeadContext {
   mainPain?: string | null;
   recommendedAction?: string | null;
   selectedCurrency?: string | null;
+  /** Pérdida anual ya convertida a moneda local y formateada (ej. "$ 94.500.000 COP"). */
+  annualLostLocal?: string | null;
   hiddenCostTotal?: number | null;
   legacyScore?: number | null;
   primaryCtaKey?: string | null;
   ctaIntent?: string | null;
   diagnosisCompletedAt?: string | null;
   freeMonthOffer: boolean;
+}
+
+// Códigos que comparten el glifo "$" — desambiguar con el código ISO (espeja send-discovery-email).
+const AMBIGUOUS_DOLLAR = new Set([
+  "USD", "MXN", "ARS", "COP", "CLP", "UYU", "DOP", "CRC", "CUP", "AUD", "CAD", "NZD", "HKD", "SGD",
+]);
+
+// Las cifras de discovery_leads se guardan en USD; se convierten a moneda local con
+// frontend_calculations.currency.fx_rate_to_usd (factor USD->local), igual que send-discovery-email.
+function fmtLocalMoney(usdAmount: number, currency: Record<string, any> | null | undefined): string {
+  const code = String(currency?.selected_currency ?? "USD").toUpperCase();
+  const rawSymbol = String(currency?.selected_currency_symbol ?? currency?.symbol ?? "$").trim();
+  const symbol = rawSymbol || code;
+  const fxRaw = Number(currency?.fx_rate_to_usd ?? currency?.fx_rate);
+  const fx = fxRaw && fxRaw > 0 ? fxRaw : 1;
+  const grouped = Math.round(usdAmount * fx).toLocaleString("es-CO");
+  const needsCode = symbol === "$" && AMBIGUOUS_DOLLAR.has(code);
+  return `${symbol} ${grouped}${needsCode ? ` ${code}` : ""}`;
 }
 
 // Mapa riesgo dominante (discovery) → copy legible para el lead. Espeja RISK_TITLES
@@ -860,7 +886,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   const [{ data: disc }, { data: demoEvent }, { data: demoOutcomeEvent }] = await Promise.all([
     sb
       .from("discovery_leads")
-      .select("id, agenda_maturity_level, annual_lost_revenue, hidden_cost_total, marketing_segment, q_urgency, desired_next_step, risk_dominant, main_pain, recommended_action, selected_currency, legacy_lead_score, primary_cta_key, created_at")
+      .select("id, agenda_maturity_level, annual_lost_revenue, hidden_cost_total, marketing_segment, q_urgency, desired_next_step, risk_dominant, main_pain, recommended_action, selected_currency, legacy_lead_score, primary_cta_key, created_at, frontend_calculations")
       .eq("lead_id", lead.id)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -893,6 +919,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
     (Date.now() - new Date((demoEvent as any).created_at).getTime()) < demoGuardMinutes * 60_000;
 
   const rc = riskCopy(disc?.risk_dominant);
+  const fcCurrency = ((disc as any)?.frontend_calculations?.currency ?? null) as Record<string, any> | null;
 
   const ctx: LeadContext = {
     name:               lead.full_name ?? "Desconocido",
@@ -918,6 +945,9 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
     mainPain:           disc?.main_pain ?? null,
     recommendedAction:  disc?.recommended_action ?? null,
     selectedCurrency:   disc?.selected_currency ?? null,
+    annualLostLocal:    disc?.annual_lost_revenue
+                          ? fmtLocalMoney(Number(disc.annual_lost_revenue), fcCurrency)
+                          : null,
     hiddenCostTotal:    disc?.hidden_cost_total ?? null,
     legacyScore:        disc?.legacy_lead_score ?? null,
     primaryCtaKey:      disc?.primary_cta_key ?? null,
@@ -1177,7 +1207,6 @@ function buildMauricioSummary(capturedName: string, disc: any, lastMsg: string, 
       : ctx.demoDuplicate ? "duplicada (no llegó)"
       : "enviada, sin tocar aún")
     : "no creada";
-  const moneda = ctx.selectedCurrency ?? "USD";
   return `🔥 *Lead caliente — Appril*
 
 *Nombre:* ${displayName}
@@ -1187,7 +1216,7 @@ ${ctx.fromDiscovery ? `*Fuente:* Diagnóstico de Agenda Blindada` : `*Fuente:* W
 ${ctx.riskTitle ? `*Riesgo dominante:* ${ctx.riskTitle}` : ""}
 ${ctx.maturity ? `*Madurez agenda:* ${ctx.maturity}` : ""}
 ${ctx.urgency ? `*Urgencia:* ${ctx.urgency}` : ""}
-${ctx.annualLost ? `*Oportunidad estimada:* ${moneda} ${ctx.annualLost}/año` : ""}
+${ctx.annualLostLocal ? `*Oportunidad estimada:* ${ctx.annualLostLocal}/año` : ""}
 ${ctx.ctaIntent ? `*CTA clickeado:* ${ctx.ctaIntent}` : ""}
 *Demo viva:* ${demoStatus}
 
