@@ -583,9 +583,40 @@ interface ParsedResponse {
 
 // ── Handler principal ───────────────────────────────────────────────────────
 
+// Health-check del canario (GET ?health=1): verifica dependencias SIN invocar a
+// Claude ni enviar WhatsApp. Respuesta mínima (solo booleanos) — no expone valores.
+async function healthCheck(): Promise<Response> {
+  const checks: Record<string, boolean> = {
+    env_wa_token:      !!Deno.env.get("WA_ACCESS_TOKEN"),
+    env_wa_phone_id:   !!Deno.env.get("WA_PHONE_NUMBER_ID"),
+    env_anthropic_key: !!Deno.env.get("ANTHROPIC_API_KEY"),
+    meta_token_valid:  false,
+    db_ok:             false,
+  };
+  // Token Meta vigente: GET liviano a Graph API (sin costo, sin mensaje).
+  try {
+    const r = await fetch(
+      `https://graph.facebook.com/${WA_API_VERSION}/${WA_PHONE_ID}?fields=id`,
+      { headers: { Authorization: `Bearer ${WA_ACCESS_TOKEN}` }, signal: AbortSignal.timeout(5000) },
+    );
+    checks.meta_token_valid = r.ok;
+  } catch { /* queda en false */ }
+  try {
+    const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { error } = await sb.from("app_config").select("key").limit(1);
+    checks.db_ok = !error;
+  } catch { /* queda en false */ }
+  const ok = Object.values(checks).every(Boolean);
+  return new Response(JSON.stringify({ ok, agent: "crm_wa_agent", checks }), {
+    status: ok ? 200 : 503,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 serve(async (req) => {
   if (req.method === "GET") {
     const url = new URL(req.url);
+    if (url.searchParams.get("health") === "1") return await healthCheck();
     const mode      = url.searchParams.get("hub.mode");
     const token     = url.searchParams.get("hub.verify_token");
     const challenge = url.searchParams.get("hub.challenge");
