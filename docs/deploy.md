@@ -37,24 +37,31 @@ Proyecto Supabase: `hwiocriejizjdqqcfrsj`.
 ### Migraciones / RPC / DDL
 
 ```bash
-# Opción A (recomendada para un cambio aislado): aplicar solo esa migración
-#   vía el MCP de Supabase (apply_migration) o psql.
-# Opción B: supabase db push  -- CUIDADO: aplica TODAS las migraciones locales
-#           pendientes, no solo la tuya. Revisa `supabase migration list` antes.
+# Aplicar SOLO esa migración vía el MCP de Supabase (apply_migration),
+# el SQL editor del dashboard, la Management API o psql directo.
 ```
+
+> ⚠️ **`supabase db push` NO funciona en este repo.** El historial de migraciones
+> del remoto usa IDs de 14 dígitos que **no correlacionan** con los nombres de
+> archivo locales (`AAAAMMDD_HHMM_nombre`). `db push` intenta reconciliar por
+> nombre, no encaja, y falla / propone aplicar cosas equivocadas. Aplica cada
+> migración a mano (MCP / SQL editor / Management API) — nunca `db push`.
 
 Mantén `supabase/schema.sql` sincronizado con la migración (es el baseline de referencia).
 
 ### Edge functions
 
 ```bash
-# Quita el lockfile antes (rompe el bundler del deploy; ya está en .gitignore):
-rm -f supabase/functions/deno.lock
-
-supabase functions deploy whatsapp-agent
-supabase functions deploy demo-callback
-supabase functions deploy inbox-send
+# Desplegar SIEMPRE con --use-api (bandera obligatoria en este repo):
+supabase functions deploy inbox-send      --use-api
+supabase functions deploy whatsapp-agent  --use-api
+supabase functions deploy demo-callback   --use-api
 ```
+
+> ⚠️ **`--use-api` es obligatorio.** El bundler local del CLI (2.72.7) rompe con el
+> `deno.lock` v5 de estas funciones (incompatibilidad de versión de lockfile).
+> `--use-api` empaqueta y despliega vía la Management API en vez del bundler local
+> y evita el error. Sin la bandera el deploy falla en el bundling.
 
 ## Orden recomendado para un cambio full-stack
 
