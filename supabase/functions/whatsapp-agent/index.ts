@@ -667,11 +667,28 @@ async function handleStatus(s: any, sb: any) {
     .select("id, workspace_id, lead_id")
     .eq("wa_message_id", s.id)
     .maybeSingle();
-  if (!queue) return; // mensajes del agente o de prod no están en la cola — ignorar
+
+  // Correlación de fallback: los mensajes MANUALES del inbox y las respuestas del
+  // agente IA no están en message_queue — guardan su wa_message_id en
+  // lead_events.metadata.wa_message_id (wa_agent_reply/manual_reply). Sin esto los
+  // receipts delivered/read de esos mensajes se descartaban.
+  let ref: { workspace_id: string; lead_id: string } | null = queue ?? null;
+  if (!ref) {
+    const { data: ev } = await sb
+      .from("lead_events")
+      .select("workspace_id, lead_id")
+      .in("event_type", ["wa_agent_reply", "manual_reply"])
+      .eq("metadata->>wa_message_id", s.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    ref = ev ?? null;
+  }
+  if (!ref) return; // no es un mensaje que conozcamos — ignorar
 
   await sb.from("lead_events").insert({
-    workspace_id: queue.workspace_id,
-    lead_id: queue.lead_id,
+    workspace_id: ref.workspace_id,
+    lead_id: ref.lead_id,
     event_type: `wa_${s.status}`,
     event_channel: "whatsapp",
     event_value: s.status,
@@ -679,18 +696,21 @@ async function handleStatus(s: any, sb: any) {
   });
 
   if (s.status === "failed") {
-    await sb.from("message_queue")
-      .update({ status: "failed", last_error: JSON.stringify(s.errors) })
-      .eq("id", queue.id);
+    if (queue) {
+      await sb.from("message_queue")
+        .update({ status: "failed", last_error: JSON.stringify(s.errors) })
+        .eq("id", queue.id);
+    }
 
     // Señales permanentes de Meta: número sin WhatsApp (131026) o destinatario
     // inválido (131000/131008 variantes de invalid recipient) → no insistir nunca.
+    // Aplica también a mensajes manuales/agente (ref.lead_id).
     const codes = (s.errors ?? []).map((e: any) => Number(e.code));
     if (codes.includes(131026)) {
       await sb.from("leads_master")
         .update({ can_whatsapp: false })
-        .eq("id", queue.lead_id);
-      console.log(`lead ${queue.lead_id}: 131026 (sin WhatsApp) → can_whatsapp=false`);
+        .eq("id", ref.lead_id);
+      console.log(`lead ${ref.lead_id}: 131026 (sin WhatsApp) → can_whatsapp=false`);
     }
   }
 }

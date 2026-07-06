@@ -14,6 +14,10 @@ const WA_PHONE_ID = Deno.env.get("WA_PHONE_NUMBER_ID")!;
 const WA_API_VERSION = Deno.env.get("WA_API_VERSION") ?? "v25.0";
 // Remitente unificado: todo Appril sale de hola@appril.co (envía y recibe).
 const FROM_EMAIL = Deno.env.get("INBOX_FROM_EMAIL") ?? "Appril <hola@appril.co>";
+// ConfigurationSet de SES: habilita eventos Open/Click/Delivery vía SNS. El mismo
+// que usa el sender de campañas (env SES_CONFIGURATION_SET). Sin él, los emails
+// manuales no reportan apertura/click. Opcional: si no está, se envía sin tracking.
+const SES_CONFIGURATION_SET = Deno.env.get("SES_CONFIGURATION_SET") ?? "";
 // Workspace que puede usar las credenciales env como fallback (Appril).
 // Otros workspaces deben tener su integración configurada — anti-fuga entre tenants.
 const DEFAULT_WORKSPACE_ID = Deno.env.get("DEFAULT_WORKSPACE_ID") ?? "";
@@ -175,12 +179,14 @@ Deno.serve(async (req: Request) => {
         .map((p: string) => `<p style="margin:0 0 14px;font-size:15px;color:#222;line-height:1.6;">${p.replace(/\n/g, "<br>")}</p>`)
         .join("");
 
-      await ses.send(new SendEmailCommand({
+      const emailSubject = subject?.trim() || "Re: Appril";
+      const sesRes = await ses.send(new SendEmailCommand({
         FromEmailAddress: fromEmail,
         Destination: { ToAddresses: [lead.email as string] },
+        ...(SES_CONFIGURATION_SET ? { ConfigurationSetName: SES_CONFIGURATION_SET } : {}),
         Content: {
           Simple: {
-            Subject: { Data: subject?.trim() || "Re: Appril", Charset: "UTF-8" },
+            Subject: { Data: emailSubject, Charset: "UTF-8" },
             Body: {
               Html: { Data: `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:600px;">${htmlBody}</div>`, Charset: "UTF-8" },
               Text: { Data: text, Charset: "UTF-8" },
@@ -189,14 +195,37 @@ Deno.serve(async (req: Request) => {
         },
       }));
 
-      await sb.from("lead_events").insert({
+      // Registrar como fila de message_queue YA ENVIADA (no como manual_reply):
+      // guardar ses_message_id permite que el webhook SES correlacione los eventos
+      // Open/Click/Delivery (que llegan por ses_message_id) y los escriba como
+      // email_opened/clicked/delivered. El hilo (conversation_messages) ya renderiza
+      // message_queue con template_key='__freeform__' mostrando payload.text.
+      const { error: mqErr } = await sb.from("message_queue").insert({
         workspace_id: lead.workspace_id,
         lead_id: lead.id,
-        event_type: "manual_reply",
-        event_channel: "email",
-        event_value: subject?.trim() ? `${subject.trim()} — ${text}` : text,
-        metadata: { manual: "true", by: "inbox" },
+        channel: "email",
+        template_key: "__freeform__",
+        to_address: lead.email,
+        payload: { text, subject: emailSubject },
+        status: "sent",
+        ses_message_id: sesRes?.MessageId ?? null,
+        triggered_by: "manual",
+        sent_at: new Date().toISOString(),
       });
+      if (mqErr) {
+        // El email YA salió por SES. Si no se pudo registrar en la cola, dejar el
+        // mensaje en el hilo como manual_reply (sin correlación de receipts) para
+        // que no desaparezca de la conversación.
+        console.error("inbox-send: fallo insert message_queue, fallback manual_reply:", mqErr.message);
+        await sb.from("lead_events").insert({
+          workspace_id: lead.workspace_id,
+          lead_id: lead.id,
+          event_type: "manual_reply",
+          event_channel: "email",
+          event_value: subject?.trim() ? `${emailSubject} — ${text}` : text,
+          metadata: { manual: "true", by: "inbox" },
+        });
+      }
     }
 
     await sb.from("leads_master").update({

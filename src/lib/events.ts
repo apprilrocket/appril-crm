@@ -36,7 +36,9 @@ const EVENT_META: Record<string, EventMeta> = {
   // Fallos
   wa_failed:                 { label: 'Falló el WhatsApp',             icon: '⚠️', tone: 'negative', category: 'outbound' },
   email_bounced:             { label: 'El email rebotó',               icon: '⚠️', tone: 'negative', category: 'outbound' },
-  email_complaint:           { label: 'Marcó el email como spam',      icon: '🚫', tone: 'negative', category: 'outbound' },
+  // El webhook SES escribe `email_complained` y `email_rejected` (no `email_complaint`).
+  email_complained:          { label: 'Marcó el email como spam',      icon: '🚫', tone: 'negative', category: 'outbound' },
+  email_rejected:            { label: 'SES rechazó el email',          icon: '⚠️', tone: 'negative', category: 'outbound' },
   unsubscribed:              { label: 'Se dio de baja',                icon: '🚫', tone: 'negative', category: 'outbound' },
 
   // Sistema / CRM

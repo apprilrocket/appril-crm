@@ -73,6 +73,7 @@ type Message = {
   buttons?: string[] | null;
   kind?: 'message' | 'system';
   is_button_reply?: boolean;
+  receipt?: string | null; // sent | delivered | read | clicked | failed
 };
 
 const VIA_LABEL: Record<string, string> = {
@@ -81,6 +82,15 @@ const VIA_LABEL: Record<string, string> = {
   campaign: 'Campaña',
   automation: 'Automatización',
   queue: 'Sistema'
+};
+
+// Estado de entrega/lectura por burbuja (email o WhatsApp). null = sin dato.
+const RECEIPT_META: Record<string, { icon: string; label: string; cls: string }> = {
+  sent:      { icon: '📤', label: 'Enviado',   cls: 'opacity-60' },
+  delivered: { icon: '✅', label: 'Entregado', cls: 'opacity-75' },
+  read:      { icon: '👀', label: 'Leído',     cls: 'font-medium' },
+  clicked:   { icon: '🔗', label: 'Click',     cls: 'font-medium' },
+  failed:    { icon: '⚠️', label: 'Falló',     cls: 'text-red-200' },
 };
 
 export function Conversation({ lead, messages }: { lead: Lead; messages: Message[] }) {
@@ -313,8 +323,13 @@ export function Conversation({ lead, messages }: { lead: Lead; messages: Message
                     ))}
                   </div>
                 )}
-                <div className={cn('text-[10px] mt-1', isIn ? 'text-neutral-400' : 'opacity-60')}>
+                <div className={cn('text-[10px] mt-1 flex items-center gap-1', isIn ? 'text-neutral-400' : 'opacity-60')}>
                   {new Date(m.happened_at).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  {!isIn && m.receipt && RECEIPT_META[m.receipt] && (
+                    <span className={cn('ml-1', RECEIPT_META[m.receipt].cls)} title={RECEIPT_META[m.receipt].label}>
+                      · {RECEIPT_META[m.receipt].icon} {RECEIPT_META[m.receipt].label}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

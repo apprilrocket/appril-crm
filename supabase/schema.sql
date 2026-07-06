@@ -521,10 +521,32 @@ $$;
 ALTER FUNCTION "public"."campaigns_overview"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."conversation_messages"("p_lead_id" "uuid") RETURNS TABLE("id" "uuid", "direction" "text", "via" "text", "channel" "text", "body" "text", "status" "text", "happened_at" timestamp with time zone, "buttons" "text"[], "kind" "text", "is_button_reply" boolean)
+CREATE OR REPLACE FUNCTION "public"."conversation_messages"("p_lead_id" "uuid") RETURNS TABLE("id" "uuid", "direction" "text", "via" "text", "channel" "text", "body" "text", "status" "text", "happened_at" timestamp with time zone, "buttons" "text"[], "kind" "text", "is_button_reply" boolean, "receipt" "text")
     LANGUAGE "sql" STABLE
     AS $$
-  with inbound as (
+  with receipts as (
+    select
+      coalesce(e.metadata->>'id', e.metadata->'mail'->>'messageId') as ext_id,
+      max(case e.event_type
+        when 'email_clicked'   then 6
+        when 'wa_read'         then 5
+        when 'email_opened'    then 5
+        when 'wa_delivered'    then 4
+        when 'email_delivered' then 4
+        when 'wa_sent'         then 3
+        when 'wa_failed'       then 2
+        when 'email_bounced'   then 2
+        when 'email_complained' then 2
+        when 'email_rejected'  then 2
+        else 0 end) as rank
+    from lead_events e
+    where e.lead_id = p_lead_id
+      and e.event_type in ('wa_sent','wa_delivered','wa_read','wa_failed',
+        'email_delivered','email_opened','email_clicked','email_bounced','email_complained','email_rejected')
+      and coalesce(e.metadata->>'id', e.metadata->'mail'->>'messageId') is not null
+    group by 1
+  ),
+  inbound as (
     select distinct on (coalesce(e.metadata->>'wa_message_id', e.metadata->>'id', e.id::text))
       e.id,
       coalesce(e.event_channel, 'whatsapp') as ch,
@@ -538,7 +560,7 @@ CREATE OR REPLACE FUNCTION "public"."conversation_messages"("p_lead_id" "uuid") 
              e.created_at
   )
   select i.id, 'in'::text, 'lead'::text, i.ch, i.txt, 'received'::text, i.created_at,
-         NULL::text[], 'message'::text, coalesce(i.is_btn, false)
+         NULL::text[], 'message'::text, coalesce(i.is_btn, false), NULL::text
   from inbound i
   union all
   select e.id, 'out'::text,
@@ -552,7 +574,9 @@ CREATE OR REPLACE FUNCTION "public"."conversation_messages"("p_lead_id" "uuid") 
         then array(select jsonb_array_elements_text(e.metadata->'buttons'))
       else NULL::text[]
     end,
-    'message'::text, false
+    'message'::text, false,
+    (select case r.rank when 6 then 'clicked' when 5 then 'read' when 4 then 'delivered' when 3 then 'sent' when 2 then 'failed' else null end
+       from receipts r where r.ext_id = e.metadata->>'wa_message_id')
   from lead_events e
   where e.lead_id = p_lead_id and e.event_type in ('wa_agent_reply', 'manual_reply')
   union all
@@ -565,7 +589,9 @@ CREATE OR REPLACE FUNCTION "public"."conversation_messages"("p_lead_id" "uuid") 
     end,
     coalesce(q.status, 'pending'),
     coalesce(q.sent_at, q.created_at),
-    NULL::text[], 'message'::text, false
+    NULL::text[], 'message'::text, false,
+    (select case r.rank when 6 then 'clicked' when 5 then 'read' when 4 then 'delivered' when 3 then 'sent' when 2 then 'failed' else null end
+       from receipts r where r.ext_id = coalesce(q.wa_message_id, q.ses_message_id))
   from message_queue q
   left join message_templates t
     on t.template_key = q.template_key and t.workspace_id = q.workspace_id
@@ -591,7 +617,7 @@ CREATE OR REPLACE FUNCTION "public"."conversation_messages"("p_lead_id" "uuid") 
       else e.event_type
     end,
     ''::text, e.created_at,
-    NULL::text[], 'system'::text, false
+    NULL::text[], 'system'::text, false, NULL::text
   from lead_events e
   where e.lead_id = p_lead_id
     and e.event_type in ('demo_created', 'demo_callback_sent', 'escalated_to_human', 'unsubscribed', 'cta_clicked')
@@ -918,7 +944,7 @@ $$;
 ALTER FUNCTION "public"."get_sequence_steps"("p_sequence_name" "text") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."inbox_threads"("p_limit" integer DEFAULT 50) RETURNS TABLE("lead_id" "uuid", "full_name" "text", "phone" "text", "email" "text", "marketing_segment" "text", "pipeline_stage" "text", "engagement_score" integer, "agent_paused" boolean, "last_inbound_at" timestamp with time zone, "last_inbound_text" "text", "last_inbound_channel" "text", "last_outbound_at" timestamp with time zone, "unread" boolean, "last_wa_reply_at" timestamp with time zone, "can_whatsapp" boolean, "can_email" boolean)
+CREATE OR REPLACE FUNCTION "public"."inbox_threads"("p_limit" integer DEFAULT 50) RETURNS TABLE("lead_id" "uuid", "full_name" "text", "phone" "text", "email" "text", "marketing_segment" "text", "pipeline_stage" "text", "engagement_score" integer, "agent_paused" boolean, "last_inbound_at" timestamp with time zone, "last_inbound_text" "text", "last_inbound_channel" "text", "last_outbound_at" timestamp with time zone, "unread" boolean, "last_wa_reply_at" timestamp with time zone, "can_whatsapp" boolean, "can_email" boolean, "last_activity_at" timestamp with time zone, "last_outbound_text" "text")
     LANGUAGE "sql" STABLE
     AS $$
   with inbound as (
@@ -937,26 +963,46 @@ CREATE OR REPLACE FUNCTION "public"."inbox_threads"("p_limit" integer DEFAULT 50
     group by e.lead_id
   ),
   outbound as (
-    select x.lead_id, max(x.at) as last_out from (
-      select q.lead_id, q.sent_at as at from message_queue q where q.status = 'sent'
+    select distinct on (z.lead_id) z.lead_id, z.at, z.txt from (
+      select q.lead_id, coalesce(q.sent_at, q.created_at) as at,
+        case
+          when q.template_key = '__freeform__'
+            then coalesce(q.payload->>'text', q.payload->>'subject', '(mensaje)')
+          else coalesce(t.text_body, t.name, q.template_key)
+        end as txt
+      from message_queue q
+      left join message_templates t on t.template_key = q.template_key and t.workspace_id = q.workspace_id
+      -- Solo envíos 1:1 (manuales/directos): excluir campañas y automatizaciones
+      -- para que un blast masivo NO inunde el inbox de "conversaciones".
+      where q.status in ('sent', 'sending', 'pending')
+        and q.campaign_id is null and q.automation_run_id is null
       union all
-      select e.lead_id, e.created_at from lead_events e
+      select e.lead_id, e.created_at, coalesce(e.event_value, '')
+      from lead_events e
       where e.event_type in ('wa_agent_reply', 'manual_reply')
-    ) x
-    group by x.lead_id
+    ) z
+    order by z.lead_id, z.at desc nulls last
+  ),
+  base as (
+    select lead_id from inbound
+    union
+    select lead_id from outbound
   )
   select
     l.id, l.full_name, l.phone, l.email,
     l.marketing_segment, l.pipeline_stage, l.engagement_score, l.agent_paused,
     i.created_at, i.txt, i.ch,
-    o.last_out,
-    (i.created_at > coalesce(l.inbox_read_at, 'epoch'::timestamptz)) as unread,
-    w.last_wa, l.can_whatsapp, l.can_email
-  from inbound i
-  join leads_master l on l.id = i.lead_id
-  left join outbound o on o.lead_id = i.lead_id
-  left join wa_win w on w.lead_id = i.lead_id
-  order by i.created_at desc
+    o.at,
+    (i.created_at is not null and i.created_at > coalesce(l.inbox_read_at, 'epoch'::timestamptz)) as unread,
+    w.last_wa, l.can_whatsapp, l.can_email,
+    greatest(coalesce(i.created_at, 'epoch'::timestamptz), coalesce(o.at, 'epoch'::timestamptz)) as last_activity_at,
+    o.txt
+  from base b
+  join leads_master l on l.id = b.lead_id
+  left join inbound i on i.lead_id = b.lead_id
+  left join outbound o on o.lead_id = b.lead_id
+  left join wa_win w on w.lead_id = b.lead_id
+  order by last_activity_at desc
   limit p_limit;
 $$;
 
