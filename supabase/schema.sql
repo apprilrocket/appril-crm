@@ -918,7 +918,7 @@ $$;
 ALTER FUNCTION "public"."get_sequence_steps"("p_sequence_name" "text") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."inbox_threads"("p_limit" integer DEFAULT 50) RETURNS TABLE("lead_id" "uuid", "full_name" "text", "phone" "text", "email" "text", "marketing_segment" "text", "pipeline_stage" "text", "engagement_score" integer, "agent_paused" boolean, "last_inbound_at" timestamp with time zone, "last_inbound_text" "text", "last_inbound_channel" "text", "last_outbound_at" timestamp with time zone, "unread" boolean)
+CREATE OR REPLACE FUNCTION "public"."inbox_threads"("p_limit" integer DEFAULT 50) RETURNS TABLE("lead_id" "uuid", "full_name" "text", "phone" "text", "email" "text", "marketing_segment" "text", "pipeline_stage" "text", "engagement_score" integer, "agent_paused" boolean, "last_inbound_at" timestamp with time zone, "last_inbound_text" "text", "last_inbound_channel" "text", "last_outbound_at" timestamp with time zone, "unread" boolean, "last_wa_reply_at" timestamp with time zone, "can_whatsapp" boolean, "can_email" boolean)
     LANGUAGE "sql" STABLE
     AS $$
   with inbound as (
@@ -929,6 +929,12 @@ CREATE OR REPLACE FUNCTION "public"."inbox_threads"("p_limit" integer DEFAULT 50
     from lead_events e
     where e.event_type in ('wa_reply', 'email_replied')
     order by e.lead_id, e.created_at desc
+  ),
+  wa_win as (
+    select e.lead_id, max(e.created_at) as last_wa
+    from lead_events e
+    where e.event_type = 'wa_reply'
+    group by e.lead_id
   ),
   outbound as (
     select x.lead_id, max(x.at) as last_out from (
@@ -944,10 +950,12 @@ CREATE OR REPLACE FUNCTION "public"."inbox_threads"("p_limit" integer DEFAULT 50
     l.marketing_segment, l.pipeline_stage, l.engagement_score, l.agent_paused,
     i.created_at, i.txt, i.ch,
     o.last_out,
-    (i.created_at > coalesce(l.inbox_read_at, 'epoch'::timestamptz)) as unread
+    (i.created_at > coalesce(l.inbox_read_at, 'epoch'::timestamptz)) as unread,
+    w.last_wa, l.can_whatsapp, l.can_email
   from inbound i
   join leads_master l on l.id = i.lead_id
   left join outbound o on o.lead_id = i.lead_id
+  left join wa_win w on w.lead_id = i.lead_id
   order by i.created_at desc
   limit p_limit;
 $$;

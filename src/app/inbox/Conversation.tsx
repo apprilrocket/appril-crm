@@ -49,7 +49,18 @@ type Lead = {
   pipeline_stage: string | null;
   agent_paused: boolean;
   unread: boolean;
+  last_wa_reply_at: string | null;
+  can_whatsapp: boolean | null;
+  can_email: boolean | null;
 };
+
+const WA_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function formatLeft(ms: number): string {
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  return h > 0 ? `${h} h ${m} min` : `${m} min`;
+}
 
 type Message = {
   id: string;
@@ -78,9 +89,49 @@ export function Conversation({ lead, messages }: { lead: Lead; messages: Message
   const [refreshing, startRefresh] = useTransition();
   const [text, setText] = useState('');
   const [subject, setSubject] = useState('');
-  const [channel, setChannel] = useState<'whatsapp' | 'email'>(lead.phone ? 'whatsapp' : 'email');
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Ventana de servicio de 24h de Meta: el texto libre por WhatsApp solo es
+  // válido dentro de las 24h desde el último mensaje ENTRANTE del lead (rodante).
+  // `now` arranca en 0 (determinista en SSR y en la primera hidratación → sin
+  // hydration mismatch); el reloj real se establece tras montar, en cliente, y se
+  // refresca cada 30s para que el candado se cierre solo. El backend (inbox-send)
+  // valida otra vez antes de enviar (doble candado).
+  const [now, setNow] = useState(0);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const hasWhatsapp = !!lead.phone;
+  const hasEmail = !!lead.email;
+  const hasAnyChannel = hasWhatsapp || hasEmail;
+
+  const lastWaMs = lead.last_wa_reply_at ? new Date(lead.last_wa_reply_at).getTime() : 0;
+  const waWindowMsLeft = lastWaMs > 0 ? WA_WINDOW_MS - (now - lastWaMs) : -1;
+  // Hasta montar no evaluamos con reloj real → estado seguro (ventana cerrada),
+  // nunca habilitamos texto libre por error en el primer render.
+  const waWindowOpen = mounted && waWindowMsLeft > 0;
+  const waOptOut = lead.can_whatsapp === false;
+  const emailOptOut = lead.can_email === false;
+
+  // Bloqueo del canal activo → deshabilita la caja y explica por qué.
+  const waBlock: 'nophone' | 'optout' | 'window' | null =
+    !hasWhatsapp ? 'nophone' : waOptOut ? 'optout' : !waWindowOpen ? 'window' : null;
+  const emailBlock: 'noemail' | 'optout' | null =
+    !hasEmail ? 'noemail' : emailOptOut ? 'optout' : null;
+
+  // Canal por defecto: WhatsApp si hay teléfono, si no email. El gating por canal
+  // (mensajes + inputs deshabilitados) se encarga del estado bloqueado; el default
+  // no depende del reloj para no arrastrar la ventana al render de servidor.
+  const [channel, setChannel] = useState<'whatsapp' | 'email'>(hasWhatsapp ? 'whatsapp' : 'email');
+
+  const currentBlock = channel === 'whatsapp' ? waBlock : emailBlock;
+  const canSend = hasAnyChannel && !currentBlock;
 
   // Marcar leído al abrir la conversación
   useEffect(() => {
@@ -117,7 +168,7 @@ export function Conversation({ lead, messages }: { lead: Lead; messages: Message
   }
 
   async function send() {
-    if (!text.trim()) return;
+    if (!text.trim() || !canSend) return;
     setError(null);
     startTransition(async () => {
       const supabase = createClient();
@@ -274,7 +325,15 @@ export function Conversation({ lead, messages }: { lead: Lead; messages: Message
 
       {/* Caja de respuesta */}
       <div className="bg-white border-t border-neutral-200 p-4">
-        {!lead.agent_paused && channel === 'whatsapp' && (
+        {!hasAnyChannel && (
+          <p className="text-[11px] text-red-600 mb-2">
+            Este lead no tiene canal de contacto (ni teléfono ni email). Agrégalo en{' '}
+            <Link href={`/leads/${lead.id}`} className="underline font-medium hover:text-red-800">
+              el perfil del lead →
+            </Link>
+          </p>
+        )}
+        {!lead.agent_paused && channel === 'whatsapp' && hasWhatsapp && (
           <p className="text-[11px] text-amber-700 mb-2">
             El agente IA está activo: también responderá a los próximos mensajes del lead. Pásalo a pausa si vas a llevar tú la conversación.
           </p>
@@ -286,7 +345,8 @@ export function Conversation({ lead, messages }: { lead: Lead; messages: Message
                 value={subject}
                 onChange={e => setSubject(e.target.value)}
                 placeholder="Asunto"
-                className="w-full px-3 py-2 text-sm border border-neutral-200 rounded-md"
+                disabled={!canSend}
+                className="w-full px-3 py-2 text-sm border border-neutral-200 rounded-md disabled:bg-neutral-50 disabled:text-neutral-400"
               />
             )}
             <textarea
@@ -295,9 +355,14 @@ export function Conversation({ lead, messages }: { lead: Lead; messages: Message
               onKeyDown={e => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send();
               }}
-              placeholder={channel === 'whatsapp' ? 'Responder por WhatsApp… (⌘↵ para enviar)' : 'Responder por email… (⌘↵ para enviar)'}
+              placeholder={
+                currentBlock
+                  ? 'Canal no disponible para este lead'
+                  : channel === 'whatsapp' ? 'Responder por WhatsApp… (⌘↵ para enviar)' : 'Responder por email… (⌘↵ para enviar)'
+              }
               rows={2}
-              className="w-full px-3 py-2 text-sm border border-neutral-200 rounded-md resize-none"
+              disabled={!canSend}
+              className="w-full px-3 py-2 text-sm border border-neutral-200 rounded-md resize-none disabled:bg-neutral-50 disabled:text-neutral-400"
             />
           </div>
           <div className="flex flex-col gap-2">
@@ -311,16 +376,36 @@ export function Conversation({ lead, messages }: { lead: Lead; messages: Message
             </select>
             <button
               onClick={send}
-              disabled={pending || !text.trim()}
+              disabled={pending || !text.trim() || !canSend}
               className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white rounded-md"
             >
               <Send size={14} /> Enviar
             </button>
           </div>
         </div>
-        {channel === 'whatsapp' && (
+
+        {/* WhatsApp: fuera de la ventana de 24h → solo templates, con enlace al lead */}
+        {channel === 'whatsapp' && waBlock === 'window' && (
+          <p className="text-[11px] text-amber-700 mt-2">
+            Estás fuera de la ventana de envío libre de mensajes (24h de Meta). Solo puedes enviar templates a este lead.{' '}
+            <Link href={`/leads/${lead.id}`} className="underline font-medium hover:text-amber-900">
+              Enviar template →
+            </Link>
+          </p>
+        )}
+        {channel === 'whatsapp' && waBlock === 'optout' && (
+          <p className="text-[11px] text-red-600 mt-2">
+            Este lead no puede recibir WhatsApp (opt-out o número sin WhatsApp).
+          </p>
+        )}
+        {channel === 'whatsapp' && !waBlock && (
           <p className="text-[11px] text-neutral-400 mt-2">
-            Texto libre: válido dentro de las 24h desde el último mensaje del lead (ventana de Meta). Fuera de la ventana usa un template desde el perfil del lead.
+            Ventana de Meta abierta · quedan {formatLeft(waWindowMsLeft)} para texto libre.
+          </p>
+        )}
+        {channel === 'email' && emailBlock === 'optout' && (
+          <p className="text-[11px] text-red-600 mt-2">
+            Este lead no puede recibir email (rebote o baja).
           </p>
         )}
         {error && <p className="text-sm text-red-600 mt-2">Error: {error}</p>}

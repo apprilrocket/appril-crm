@@ -743,7 +743,41 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
 
   const isButtonReply = !!(btnReply || tplBtn);
 
-  if (!userText) return;
+  if (!userText) {
+    // Mensaje entrante sin texto: media, nota de voz, video, documento, sticker
+    // o ubicación (muy común en LATAM). El agente IA no puede procesarlo, pero
+    // Meta SÍ reabre su ventana de servicio de 24h con cualquier inbound del
+    // usuario. Lo registramos como wa_reply (kind='media') para que la ventana
+    // (UI + inbox-send) y el inbox reflejen que el lead escribió. NO se dispara
+    // respuesta automática. El índice único uq_lead_events_wa_reply_wamid
+    // deduplica reintentos de Meta (insert conflictivo → se ignora).
+    const caption = msg.image?.caption ?? msg.video?.caption ?? msg.document?.caption ?? null;
+    const mediaKind = msg.image ? "imagen"
+      : (msg.audio || msg.voice) ? "audio"
+      : msg.video ? "video"
+      : msg.document ? "documento"
+      : msg.sticker ? "sticker"
+      : msg.location ? "ubicación"
+      : "adjunto";
+    const { data: mLeads } = await sb
+      .from("leads_master")
+      .select("id")
+      .or(`phone.eq.${fromPhone},phone.eq.${msg.from}`)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const mLeadId = mLeads?.[0]?.id;
+    if (mLeadId) {
+      await sb.from("lead_events").insert({
+        workspace_id: WORKSPACE_ID,
+        lead_id: mLeadId,
+        event_type: "wa_reply",
+        event_channel: "whatsapp",
+        event_value: caption ? `📎 ${mediaKind}: ${caption}` : `📎 ${mediaKind}`,
+        metadata: { wa_message_id: msg.id, phone: fromPhone, kind: "media", media_type: mediaKind },
+      });
+    }
+    return;
+  }
 
   // Buscar lead — usar limit(1) para evitar error si hay duplicados históricos
   const { data: leads } = await sb

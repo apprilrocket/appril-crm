@@ -22,6 +22,9 @@ type Thread = {
   last_inbound_channel: string;
   last_outbound_at: string | null;
   unread: boolean;
+  last_wa_reply_at: string | null;
+  can_whatsapp: boolean | null;
+  can_email: boolean | null;
 };
 
 export default async function InboxPage({
@@ -105,7 +108,10 @@ export default async function InboxPage({
             marketing_segment: selected.marketing_segment,
             pipeline_stage: selected.pipeline_stage,
             agent_paused: selected.agent_paused,
-            unread: selected.unread
+            unread: selected.unread,
+            last_wa_reply_at: selected.last_wa_reply_at,
+            can_whatsapp: selected.can_whatsapp,
+            can_email: selected.can_email
           }}
           messages={messages ?? []}
         />

@@ -95,6 +95,30 @@ Deno.serve(async (req: Request) => {
       if (lead.can_whatsapp === false) {
         return json(422, { ok: false, error: "el lead tiene can_whatsapp=false (opt-out o número sin WhatsApp)" });
       }
+
+      // Ventana de servicio de 24h de Meta: el texto libre solo es válido dentro
+      // de las 24h desde el último mensaje ENTRANTE del lead. Fuera de la ventana
+      // Meta rechaza; validamos ANTES de llamar para dar un error accionable y no
+      // depender del rechazo remoto (doble candado con la UI).
+      const { data: lastIn } = await sb
+        .from("lead_events")
+        .select("created_at")
+        .eq("lead_id", lead.id)
+        .eq("event_type", "wa_reply")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const lastInboundMs = lastIn?.created_at ? new Date(lastIn.created_at as string).getTime() : 0;
+      const windowOpen = lastInboundMs > 0 && (Date.now() - lastInboundMs) < 24 * 60 * 60 * 1000;
+      if (!windowOpen) {
+        return json(422, {
+          ok: false,
+          code: "window_closed",
+          error: "Estás fuera de la ventana de envío libre de mensajes (24h de Meta). Solo puedes enviar templates a este lead.",
+        });
+      }
+
       const to = String(lead.phone).replace(/^\+/, "");
 
       const waPhoneId = ch.waPhoneId ?? (isDefaultWs ? WA_PHONE_ID : null);
