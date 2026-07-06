@@ -24,7 +24,7 @@ No es un chatbot de menú. Sigue una metodología de venta consultiva real
 | `demo-callback` (Edge Function) | Cuando el doctor toca el botón de la demo, retoma la venta con el remate de cierre. |
 | `inbox-send` (Edge Function) | Permite al humano responder manualmente desde el dashboard. |
 | `automation_tick()` (función de DB) | El motor de outbound: encola los primeros toques (templates). |
-| `appril-sender` (n8n) | Drena la cola y envía los templates por la API de Meta. |
+| `appril-sender` (Lambda AWS) | Drena la cola y envía los templates por la API de Meta. |
 | MCP `appril-campaigns` | Herramienta para que el equipo prepare campañas/listas/secuencias. |
 
 El historial completo de cada conversación vive en la tabla `lead_events` (no hay
@@ -43,7 +43,7 @@ Hay cuatro maneras:
 ### Vía A — Plantilla de outbound (la principal para campañas en frío)
 1. El lead entra a una automatización o campaña.
 2. `automation_tick()` lo encola en `message_queue` con una plantilla aprobada.
-3. `appril-sender` (n8n) envía la plantilla. Esto abre la conversación.
+3. `appril-sender` (Lambda AWS) envía la plantilla. Esto abre la conversación.
 4. **Cuando el lead responde** → entra al `whatsapp-agent` → el agente vende.
 
 > Guarda importante: el outbound de WhatsApp **solo se encola si el teléfono está
