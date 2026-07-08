@@ -1059,18 +1059,30 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   text = fixSignupUrl(text);
 
   // Enviar respuesta al usuario
-  await sendWA(fromPhone, text, buttons);
+  const sendResult = await sendWA(fromPhone, text, buttons);
+  if (!sendResult.ok) {
+    console.error(`Respuesta del agente NO entregada a lead ${lead.id}: ${sendResult.error}`);
+  }
 
   // FIX 3 — Guardar wa_agent_reply INMEDIATAMENTE después de enviar
   // Esto garantiza que el contexto esté disponible si el usuario responde rápido,
   // independientemente de cuánto tarde handleDemoCreation o el handoff.
+  // Se registra el resultado real del envío (send_ok/send_error) para no marcar
+  // como entregado algo que falló, y el wa_message_id para correlacionar receipts.
   await sb.from("lead_events").insert({
     workspace_id: WORKSPACE_ID,
     lead_id: lead.id,
     event_type: "wa_agent_reply",
     event_channel: "whatsapp",
     event_value: text,
-    metadata: { buttons, handoff: handoffMauricio, model: "claude-sonnet-4-6" },
+    metadata: {
+      buttons,
+      handoff: handoffMauricio,
+      model: "claude-sonnet-4-6",
+      send_ok: sendResult.ok,
+      ...(sendResult.error ? { send_error: sendResult.error } : {}),
+      ...(sendResult.waMessageId ? { wa_message_id: sendResult.waMessageId } : {}),
+    },
   });
 
   // Post-procesamiento (no bloquea el contexto del siguiente mensaje).
@@ -1312,7 +1324,7 @@ ${ctx.ctaIntent ? `*CTA clickeado:* ${ctx.ctaIntent}` : ""}
 
 // ── Enviar WhatsApp ──────────────────────────────────────────────────────────
 
-async function sendWA(to: string, text: string, buttons: string[]) {
+async function sendWA(to: string, text: string, buttons: string[]): Promise<{ ok: boolean; error?: string; waMessageId?: string | null }> {
   const phone = to.replace(/^\+/, "");
   const url = `https://graph.facebook.com/${WA_API_VERSION}/${WA_PHONE_ID}/messages`;
 
@@ -1343,7 +1355,7 @@ async function sendWA(to: string, text: string, buttons: string[]) {
     };
   }
 
-  await fetch(url, {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${WA_ACCESS_TOKEN}`,
@@ -1351,4 +1363,17 @@ async function sendWA(to: string, text: string, buttons: string[]) {
     },
     body: JSON.stringify(body),
   });
+
+  // Antes se ignoraba la respuesta → los fallos de envío (token vencido, número
+  // sin WhatsApp, etc.) eran SILENCIOSOS y el agente igual registraba la respuesta
+  // como si hubiera salido. Ahora revisamos res.ok, logueamos el error de Meta
+  // (visible en los logs de la función) y devolvemos el estado al llamador.
+  const data = await res.json().catch(() => ({} as any));
+  if (!res.ok) {
+    const err = data?.error?.message ?? `HTTP ${res.status}`;
+    const code = data?.error?.code ?? res.status;
+    console.error(`sendWA fallo → ${to} [${code}]: ${err}`);
+    return { ok: false, error: `${code}: ${err}` };
+  }
+  return { ok: true, waMessageId: data?.messages?.[0]?.id ?? null };
 }
