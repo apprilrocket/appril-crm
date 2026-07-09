@@ -305,7 +305,7 @@ Hizo diagnóstico + volvió + acepta demo → SUPER_HOT · Pregunta precio o pid
 PLAN EMAIL — USD 10/mes · USD 79/año (~35% dto.)
 PLAN WHATSAPP — USD 25/mes · USD 199/año (~35% dto.) — el más recomendado si usan WA.
 ASISTENTE WA — USD 25/mes adicional — el profesional le pide a Appril: ver agenda, crear citas, bloquear horarios, estadísticas.
-
+${ctx.localPricesLine ? `\n${ctx.localPricesLine}\n` : ""}
 Al preguntar precio:
 "Tenemos tres opciones:
 Email: USD 10/mes.
@@ -520,6 +520,8 @@ interface LeadContext {
   selectedCurrency?: string | null;
   /** Pérdida anual ya convertida a moneda local y formateada (ej. "$ 94.500.000 COP"). */
   annualLostLocal?: string | null;
+  /** Precios del plan convertidos a moneda local desde fx_rates (determinístico, calculado en código). */
+  localPricesLine?: string | null;
   hiddenCostTotal?: number | null;
   legacyScore?: number | null;
   primaryCtaKey?: string | null;
@@ -544,6 +546,40 @@ function fmtLocalMoney(usdAmount: number, currency: Record<string, any> | null |
   const grouped = Math.round(usdAmount * fx).toLocaleString("es-CO");
   const needsCode = symbol === "$" && AMBIGUOUS_DOLLAR.has(code);
   return `${symbol} ${grouped}${needsCode ? ` ${code}` : ""}`;
+}
+
+// Moneda por prefijo telefónico, para leads sin Discovery. Ecuador, Panamá y
+// El Salvador usan USD (el default), por eso no aparecen.
+const PHONE_CURRENCY: Record<string, string> = {
+  "57": "COP", "52": "MXN", "54": "ARS", "56": "CLP", "51": "PEN",
+  "55": "BRL", "34": "EUR", "598": "UYU", "595": "PYG", "591": "BOB",
+  "506": "CRC", "502": "GTQ", "504": "HNL", "505": "NIO",
+};
+function currencyForPhone(phone: string): string {
+  const p = phone.replace(/^\+/, "");
+  return PHONE_CURRENCY[p.slice(0, 3)] ?? PHONE_CURRENCY[p.slice(0, 2)] ?? "USD";
+}
+
+// Línea de equivalencias de precios en moneda local para el prompt, leyendo la
+// tabla fx_rates (refrescada a diario por cron desde open.er-api.com). La
+// conversión ocurre AQUÍ, en código — el modelo solo repite cifras selladas.
+// null si la moneda es USD o no hay tasa: el prompt queda como siempre.
+async function buildLocalPricesLine(sb: any, disc: any, phone: string): Promise<string | null> {
+  const cur = String(disc?.selected_currency ?? currencyForPhone(phone)).toUpperCase();
+  if (!cur || cur === "USD") return null;
+  const { data: fx } = await sb.from("fx_rates")
+    .select("rate_usd_to_local, fetched_at")
+    .eq("currency", cur)
+    .maybeSingle();
+  const rate = Number(fx?.rate_usd_to_local);
+  if (!rate || rate <= 0) return null;
+  const f = (usd: number) => `≈ $${Math.round(usd * rate).toLocaleString("es-CO")} ${cur}`;
+  const day = String(fx.fetched_at).slice(0, 10);
+  return `EQUIVALENCIAS EN MONEDA LOCAL (tasa de referencia del ${day}: 1 USD ≈ ${rate.toLocaleString("es-CO", { maximumFractionDigits: 2 })} ${cur}):
+· Email: USD 10/mes ${f(10)} · USD 79/año ${f(79)}
+· WhatsApp: USD 25/mes ${f(25)} · USD 199/año ${f(199)}
+· Asistente WA: USD 25/mes adicional ${f(25)}
+Si preguntan cuánto es en su moneda: da la cifra local con "≈" y aclara que el cobro es en USD y el valor exacto depende de la tasa del día del pago. Estas equivalencias son la ÚNICA conversión permitida — jamás calcules ni inventes otra tasa.`;
 }
 
 // Mapa riesgo dominante (discovery) → copy legible para el lead. Espeja RISK_TITLES
@@ -1154,6 +1190,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
 
   const rc = riskCopy(disc?.risk_dominant);
   const fcCurrency = ((disc as any)?.frontend_calculations?.currency ?? null) as Record<string, any> | null;
+  const localPricesLine = await buildLocalPricesLine(sb, disc, fromPhone);
 
   const ctx: LeadContext = {
     name:               lead.full_name ?? "Desconocido",
@@ -1182,6 +1219,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
     annualLostLocal:    disc?.annual_lost_revenue
                           ? fmtLocalMoney(Number(disc.annual_lost_revenue), fcCurrency)
                           : null,
+    localPricesLine,
     hiddenCostTotal:    disc?.hidden_cost_total ?? null,
     legacyScore:        disc?.legacy_lead_score ?? null,
     primaryCtaKey:      disc?.primary_cta_key ?? null,
