@@ -63,6 +63,19 @@ supabase functions deploy demo-callback   --use-api
 > `--use-api` empaqueta y despliega vía la Management API en vez del bundler local
 > y evita el error. Sin la bandera el deploy falla en el bundling.
 
+### Secrets de WhatsApp — dos consumidores, no uno
+
+> ⚠️ **`WA_ACCESS_TOKEN` no vive solo en los secrets de este proyecto Supabase.** Lo
+> consumen las Edge Functions del CRM (`whatsapp-agent`, `inbox-send`, `demo-callback`)
+> **y también** el Lambda `appril-crm-sender` en AWS us-east-1 (`appril-sender/src/whatsapp.ts:5`).
+> Al rotar el token hay que actualizar **ambos sitios**. Si actualizas solo Supabase, el
+> `whatsapp-agent` responde y su health check `?health=1` da `meta_token_valid:true`
+> (verde), pero la cola `message_queue` que drena el Lambda sigue rechazada por Meta en
+> silencio. Fue exactamente el incidente del **2026-07-09** (token de la app de Meta
+> equivocada, sin acceso al `phone_number_id` comercial → Meta `error_code 100`, NO 190).
+> Distinción útil: **100** = objeto/permiso inexistente (token de la app equivocada);
+> **190** = token expirado. Los system-user tokens no caducan solos.
+
 ## Orden recomendado para un cambio full-stack
 
 1. **Backend primero** (migración + edge functions): suele ser retrocompatible
