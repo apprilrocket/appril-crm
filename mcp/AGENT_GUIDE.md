@@ -16,6 +16,12 @@ Es un servidor **MCP** que expone el ciclo de marketing del CRM de Appril como u
 - Construir y validar **secuencias/automations**.
 - **Previsualizar audiencias** y **monitorear** envíos (abiertos, clics, rebotes).
 - Enviar **emails de prueba** a direcciones autorizadas.
+- **Leer el CRM** (desde 2026-07-09): buscar leads, ver su timeline, leer el inbox
+  unificado y conversaciones (con ventana de 24h calculada), reportes agregados y salud
+  de los agentes WA.
+- **Escrituras acotadas sobre leads** (desde 2026-07-09): mover de etapa, editar perfil
+  (consentimiento solo-revocable), notas, tareas, pausar/reanudar el agente comercial.
+  Ninguna toca `message_queue` ni envía nada.
 
 **Lo que NO hace (a propósito):** no envía campañas masivas por su cuenta, no activa
 secuencias, no aprueba envíos. Prepara todo en **borrador** y deja el disparo final a un
@@ -111,6 +117,32 @@ Handshake estándar MCP: `initialize` → `notifications/initialized` → `tools
 | `create_automation` | `name` | Crea borrador con nodo trigger. |
 | `update_automation` | `id`, `[name]`, `[flow]` | Actualiza y **valida** el flow. No activa ni enrola. |
 
+### Lecturas del CRM (leads, inbox, reportes, salud) — solo lectura (2026-07-09, `82c7d71`)
+| Tool | Parámetros | Qué hace |
+|---|---|---|
+| `search_leads` | `[q]`, `[segment]`, `[stage]`, `[city]`, `[specialization]`, `[can_email]`, `[can_whatsapp]`, `[limit]` | Busca leads por texto (nombre/email/teléfono) y filtros. Default 20, máx 100. |
+| `get_lead` | `[lead_id]`/`[email]`/`[phone]` (uno) | Lead completo + últimos 10 eventos + tareas abiertas. |
+| `lead_timeline` | `lead_id`, `[limit]` | Timeline de `lead_events`, más reciente primero (default 50, máx 200). |
+| `inbox_threads` | `[limit]` | Hilos del inbox unificado (misma RPC que el dashboard): último inbound/outbound, unread, `last_wa_reply_at`, flags de canal. |
+| `get_conversation` | `lead_id` | Conversación completa (burbujas con receipts) + estado calculado de la **ventana de 24h de Meta** (open/expires_at). |
+| `get_report` | `report` (`funnel`/`channel_stats`/`activity_daily`/`quality_summary`), `[days]` | Reportes agregados del CRM. |
+| `agent_health` | `[status]` (`open`/`notified`/`resolved`), `[limit]` | Incidentes del watchdog de agentes WA (`agent_health_incidents`) + conteo de abiertos. |
+
+### Escrituras acotadas sobre leads (2026-07-09, `e05df51`) — jamás tocan `message_queue`
+| Tool | Parámetros | Qué hace |
+|---|---|---|
+| `update_lead_stage` | `lead_id`, `stage` | Mueve el lead de etapa (valida contra `pipeline_stages`); evento `stage_changed` auditado. |
+| `update_lead` | `lead_id`, `[fields]`, `[revoke_can_email]`, `[revoke_can_whatsapp]` | Edita perfil (whitelist: full_name, first_name, city, country, specialization, marketing_segment). **Consentimiento solo-revocable**: puede quitar canales, jamás habilitarlos. |
+| `add_lead_note` | `lead_id`, `body` | Nota interna (`lead_notes`, visible en el dashboard). |
+| `create_lead_task` | `lead_id`, `title`, `[description]`, `[due_at]` | Tarea `open` con vencimiento opcional. |
+| `complete_lead_task` | `task_id`, `[reopen]` | Completa (o reabre) una tarea. |
+| `set_agent_paused` | `lead_id`, `paused`, `[reason]` | Pausa/reanuda el agente IA comercial para ese lead. Auditado en `lead_events`. |
+
+> **Excluido a propósito:** re-encolar/reintentar mensajes fallidos NO existe como tool
+> (re-encolar = disparar envíos reales → violaría `FORBIDDEN_WRITES`, `src/guardrails.ts`).
+> Sigue siendo exclusivo de la UI. Todas las mutaciones quedan auditadas con
+> `triggered_by: mcp`.
+
 ### Prueba
 | Tool | Parámetros | Qué hace |
 |---|---|---|
@@ -181,6 +213,9 @@ Invariantes garantizados por el servidor (no intentes rodearlos):
    aprobadas.
 4. **Único envío:** `send_test`, 1 mensaje, sólo a la *allowlist*.
 5. Todo está acotado al `workspace` configurado.
+6. **No re-encola ni reintenta mensajes fallidos** (excluido de las tools de escritura a
+   propósito) y **no puede otorgar consentimiento** (`can_email`/`can_whatsapp` solo se
+   revocan vía MCP, nunca se habilitan).
 
 Si el usuario pide "manda ya la campaña a todos": la respuesta correcta es prepararla y
 programarla, y explicar que **un humano debe aprobarla**.
