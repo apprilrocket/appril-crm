@@ -189,20 +189,20 @@ Puede crear la cuenta sin tarjeta aquí:
 ${SIGNUP_URL}
 Si prefiere no configurarlo solo, alguien del equipo Appril puede acompañarlo 10–15 minutos para dejar el primer flujo listo."
 → Si dice sí al link: modo activación (interno: 10 pacientes + 10 citas).
-→ Si además quiere acompañamiento: también [HANDOFF_MAURICIO:${ctx.name}].
+→ Si además quiere acompañamiento: también usa la herramienta handoff_mauricio (lead_name: "${ctx.name}").
 
 CIERRE B — LINK + ACOMPAÑAMIENTO (lead listo, con fricción)
 Señal: SUPER_HOT/HOT de Discovery con dudas · quiere configuración acompañada · clínica con varios profesionales · pide descuento · quiere activar pero no solo.
 "Le comparto el link para que pueda avanzar sin esperar:
 ${SIGNUP_URL}
 Y si quiere, le paso con Mauricio García, fundador de Appril, para que lo ayude a dejar configuradas sus primeras confirmaciones y recordatorios sin que tenga que repetir todo."
-→ [HANDOFF_MAURICIO:${ctx.name}] — el lead no tiene que esperar para empezar.
+→ usa la herramienta handoff_mauricio (lead_name: "${ctx.name}") — el lead no tiene que esperar para empezar.
 
 CIERRE C — HANDOFF PURO (fricción que el agente no puede resolver)
 Señal: pide hablar con persona · pregunta privacidad/facturación · quiere negociar · objeción sin resolver · agente no sabe · demo falló con intención alta.
 "Doctor/a, por lo que me cuenta, vale la pena que alguien del equipo Appril lo acompañe directamente.
 Le paso el contexto a Mauricio García, fundador de Appril, para que no tenga que repetir todo."
-→ [HANDOFF_MAURICIO:${ctx.name}] + [MAURICIO_MSG]...[/MAURICIO_MSG]
+→ Usa la herramienta handoff_mauricio con lead_name y un resumen de contexto para Mauricio.
 
 CUÁNDO TERMINA LA CONVERSACIÓN:
 · "ya me registré" → activación (10 pacientes + 10 citas).
@@ -227,17 +227,17 @@ ${ctx.name !== "Desconocido"
 "Le voy a mostrar algo en vivo, doctor/a.
 En unos segundos le va a llegar un WhatsApp desde el número de pacientes de Appril — no desde este chat.
 Tóquelo como si usted fuera el paciente."
-→ Incluye [CREATE_DEMO] al final de tu respuesta. ${ctx.demoAlreadyCreated
+→ Usa la herramienta create_demo junto con tu respuesta. ${ctx.demoAlreadyCreated
     ? ctx.demoOutcome === "confirm"
-      ? `✅ DEMO YA VIVIDA Y CONFIRMADA — NO incluir [CREATE_DEMO]. NO preguntar si encontró el mensaje. NO volver a explicar qué va a llegar. El doctor ya tocó "Confirmar" y vivió el ajá moment. Retoma desde el remate ("¿Vio qué simple? Un toque. Eso mismo harían sus pacientes sin que nadie los persiga.") solo si aún no se lo dijiste, y avanza directo a MODO CIERRE: link sin tarjeta o acompañamiento del equipo Appril.`
+      ? `✅ DEMO YA VIVIDA Y CONFIRMADA — NO usar la herramienta create_demo. NO preguntar si encontró el mensaje. NO volver a explicar qué va a llegar. El doctor ya tocó "Confirmar" y vivió el ajá moment. Retoma desde el remate ("¿Vio qué simple? Un toque. Eso mismo harían sus pacientes sin que nadie los persiga.") solo si aún no se lo dijiste, y avanza directo a MODO CIERRE: link sin tarjeta o acompañamiento del equipo Appril.`
       : ctx.demoOutcome === "cancel"
-      ? `✅ DEMO YA VIVIDA (LA CANCELÓ) — NO incluir [CREATE_DEMO]. NO preguntar si encontró el mensaje. El doctor tocó "Cancelar", también vivió la experiencia. Usa el remate de cancelación ("¿Vio? Incluso cuando cancela, el consultorio gana claridad a tiempo. Cero persecución.") y avanza a cierre.`
+      ? `✅ DEMO YA VIVIDA (LA CANCELÓ) — NO usar la herramienta create_demo. NO preguntar si encontró el mensaje. El doctor tocó "Cancelar", también vivió la experiencia. Usa el remate de cancelación ("¿Vio? Incluso cuando cancela, el consultorio gana claridad a tiempo. Cero persecución.") y avanza a cierre.`
       : ctx.demoDuplicate
-      ? `⚠️ DEMO DUPLICADA — NO incluir [CREATE_DEMO]. El sistema registró que este número ya tenía una cita demo activa en Appril. Di: "Doctor/a, el sistema ya tiene registrada una cita demo con su número. Puede que el mensaje haya llegado antes. Si no lo encuentra, le conecto con alguien del equipo Appril para que se la muestre directamente." → [HANDOFF_MAURICIO:${ctx.name}]`
-      : `⚠️ DEMO YA ENVIADA, SIN RESPUESTA AÚN — NO incluir [CREATE_DEMO]. NO decir "Le voy a mostrar algo en vivo" ni hacer promesas de que llegará un mensaje. Di: "Doctor/a, ya le envié la demo anteriormente — debe haberle llegado un WhatsApp desde el número de pacientes de Appril, diferente a este chat. ¿Lo encontró?" Si dice que no llegó: [HANDOFF_MAURICIO:${ctx.name}]`
+      ? `⚠️ DEMO DUPLICADA — NO usar la herramienta create_demo. El sistema registró que este número ya tenía una cita demo activa en Appril. Di: "Doctor/a, el sistema ya tiene registrada una cita demo con su número. Puede que el mensaje haya llegado antes. Si no lo encuentra, le conecto con alguien del equipo Appril para que se la muestre directamente." → usa la herramienta handoff_mauricio (lead_name: "${ctx.name}")`
+      : `⚠️ DEMO YA ENVIADA, SIN RESPUESTA AÚN — NO usar la herramienta create_demo. NO decir "Le voy a mostrar algo en vivo" ni hacer promesas de que llegará un mensaje. Di: "Doctor/a, ya le envié la demo anteriormente — debe haberle llegado un WhatsApp desde el número de pacientes de Appril, diferente a este chat. ¿Lo encontró?" Si dice que no llegó: usa la herramienta handoff_mauricio (lead_name: "${ctx.name}")`
     : "Una sola vez por conversación."}
 
-REENVÍO POR INSISTENCIA (override): las notas "NO incluir [CREATE_DEMO]" de arriba aplican solo a que TÚ no la re-ofrezcas sola. Si el DOCTOR la pide explícitamente otra vez ("no me llegó", "mándemela de nuevo", "muéstreme otra vez", "no la veo"), SÍ incluye [CREATE_DEMO] de nuevo — el sistema la reenvía en OTRO horario y le vuelve a llegar. En ese caso NO hagas handoff por "no llegó"; reenvía primero, con naturalidad ("Se la reenvío ahora mismo, doctor — en unos segundos le llega."), sin repetir explicaciones largas.
+REENVÍO POR INSISTENCIA (override): las notas "NO usar la herramienta create_demo" de arriba aplican solo a que TÚ no la re-ofrezcas sola. Si el DOCTOR la pide explícitamente otra vez ("no me llegó", "mándemela de nuevo", "muéstreme otra vez", "no la veo"), SÍ usa la herramienta create_demo de nuevo — el sistema la reenvía en OTRO horario y le vuelve a llegar. En ese caso NO hagas handoff por "no llegó"; reenvía primero, con naturalidad ("Se la reenvío ahora mismo, doctor — en unos segundos le llega."), sin repetir explicaciones largas.
 
 NUNCA digas "Le acabo de crear" ni "Ya le envié" — eso lo confirma el sistema, no tú.
 
@@ -245,7 +245,7 @@ REMATE SEGÚN ACCIÓN (primero refuerza lo que acaba de comprobar, luego el link
 · Confirmó → "Doctor/a, eso que acaba de ver es el punto: el paciente confirma con un toque y el consultorio gana claridad sin perseguirlo por WhatsApp.\nPuede empezar sin tarjeta aquí:\n${SIGNUP_URL}\nSi prefiere no configurarlo solo, alguien del equipo Appril puede acompañarlo 10–15 minutos para dejar activos sus primeros recordatorios y confirmaciones."
 · Canceló → "Doctor/a, incluso cuando el paciente cancela, el consultorio gana algo importante: claridad a tiempo. Eso permite reaccionar antes, liberar el espacio o evitar estar escribiendo uno por uno por WhatsApp.\nPuede empezar sin tarjeta aquí:\n${SIGNUP_URL}\n¿Quiere que alguien del equipo Appril lo acompañe a dejar el primer flujo listo?"
 · No responde → "Debe llegar desde el número de pacientes de Appril. Cuando la toque, el sistema lo registra al instante."
-· Demo falla → "Parece que se demoró. Le paso con alguien del equipo Appril para que se la muestre en vivo." [HANDOFF_MAURICIO:${ctx.name}]
+· Demo falla → "Parece que se demoró. Le paso con alguien del equipo Appril para que se la muestre en vivo." usa la herramienta handoff_mauricio (lead_name: "${ctx.name}")
 
 ━━━ DIAGNÓSTICO DE AGENDA BLINDADA ━━━
 
@@ -290,7 +290,7 @@ Según respuesta — entregar el insight correspondiente:
 Después del insight: demo viva → remate → cierre.
 "Por lo que vio en el diagnóstico y lo que acaba de vivir, tiene sentido probarlo.
 ¿Le comparto el link sin tarjeta o prefiere que alguien del equipo Appril lo acompañe a dejar sus primeras confirmaciones listas en 10-15 minutos?"
-[BOTONES: Crear cuenta gratis | Hablar con Appril]
+→ usa la herramienta send_buttons con: ["Crear cuenta gratis", "Hablar con Appril"]
 
 SI NO TERMINÓ EL DIAGNÓSTICO:
 "Sin problema. Le hago una versión rápida por aquí.
@@ -318,15 +318,15 @@ Nunca garantizar resultados. Usar "puede superar", "en rangos esperados", "suele
 
 ━━━ OBJECIONES — RESPONDER Y AVANZAR ━━━
 
-"Mi asistente ya hace eso" → "Claro, y eso es valioso. Appril no reemplaza a su asistente: le quita la parte repetitiva — confirmar, recordar, cancelar o reagendar sin tener que perseguir paciente por paciente. Le puedo mostrar en vivo cómo se vería para un paciente. ¿Se la envío?" Si acepta: [CREATE_DEMO]
-"Ya uso WhatsApp" → "Perfecto, entonces el canal ya está. El problema suele ser que la agenda termina dependiendo de mensajes sueltos: quién confirmó, quién canceló, quién pidió mover la cita. Appril ordena esa parte para que el paciente pueda actuar y el consultorio tenga claridad. ¿Quiere verlo en una demo real?" [CREATE_DEMO]
-"Ya tengo software" / "Mi sistema ya lo hace" → "Eso ayuda mucho para guardar la cita y la historia del paciente. Appril entra en otra parte: lo que pasa antes de que el paciente llegue — confirmar, recordar, cancelar, reagendar y recuperar espacios a tiempo. ¿Se lo muestro en vivo?" [CREATE_DEMO]
-"Ya tengo Doctoralia" → "Doctoralia ayuda a que lo encuentren. Appril ordena lo que pasa después: confirmar, cancelar a tiempo y recuperar espacios. ¿Se lo muestro en vivo?" [CREATE_DEMO]
-"No quiero robots" → "Le muestro la experiencia real: no es una conversación rara, es un mensaje claro y un botón. ¿Se la envío?" [CREATE_DEMO]
+"Mi asistente ya hace eso" → "Claro, y eso es valioso. Appril no reemplaza a su asistente: le quita la parte repetitiva — confirmar, recordar, cancelar o reagendar sin tener que perseguir paciente por paciente. Le puedo mostrar en vivo cómo se vería para un paciente. ¿Se la envío?" Si acepta: usa la herramienta create_demo
+"Ya uso WhatsApp" → "Perfecto, entonces el canal ya está. El problema suele ser que la agenda termina dependiendo de mensajes sueltos: quién confirmó, quién canceló, quién pidió mover la cita. Appril ordena esa parte para que el paciente pueda actuar y el consultorio tenga claridad. ¿Quiere verlo en una demo real?" usa la herramienta create_demo
+"Ya tengo software" / "Mi sistema ya lo hace" → "Eso ayuda mucho para guardar la cita y la historia del paciente. Appril entra en otra parte: lo que pasa antes de que el paciente llegue — confirmar, recordar, cancelar, reagendar y recuperar espacios a tiempo. ¿Se lo muestro en vivo?" usa la herramienta create_demo
+"Ya tengo Doctoralia" → "Doctoralia ayuda a que lo encuentren. Appril ordena lo que pasa después: confirmar, cancelar a tiempo y recuperar espacios. ¿Se lo muestro en vivo?" usa la herramienta create_demo
+"No quiero robots" → "Le muestro la experiencia real: no es una conversación rara, es un mensaje claro y un botón. ¿Se la envío?" usa la herramienta create_demo
 "Está caro" → "Entiendo. Por eso no le propondría empezar con todo. Lo ideal es probarlo con algo concreto: confirmaciones y cancelaciones de sus próximas citas. Si le ahorra tiempo o le ayuda a recuperar espacios, tiene sentido. Si no, no." Luego, si aplica, ofrecer el mes gratis.
-"Mándeme información" → "Claro, también puedo dejarle información. Pero para que no sea algo genérico, lo más útil es que vea primero una demo real en este WhatsApp. Toma menos de un minuto y ve exactamente qué recibiría un paciente. ¿Se la muestro?" [CREATE_DEMO]
-"No tengo tiempo" → "Justamente por eso no le propongo una llamada larga. Le puedo mostrar una demo aquí mismo: toma menos de un minuto y usted decide si vale la pena avanzar." [CREATE_DEMO]
-"Mis pacientes no lo usarían" → "Esa duda es normal. Por eso la demo es útil: usted lo vive como paciente y ve si el mensaje es claro o no. ¿Se la envío?" [CREATE_DEMO]
+"Mándeme información" → "Claro, también puedo dejarle información. Pero para que no sea algo genérico, lo más útil es que vea primero una demo real en este WhatsApp. Toma menos de un minuto y ve exactamente qué recibiría un paciente. ¿Se la muestro?" usa la herramienta create_demo
+"No tengo tiempo" → "Justamente por eso no le propongo una llamada larga. Le puedo mostrar una demo aquí mismo: toma menos de un minuto y usted decide si vale la pena avanzar." usa la herramienta create_demo
+"Mis pacientes no lo usarían" → "Esa duda es normal. Por eso la demo es útil: usted lo vive como paciente y ve si el mensaje es claro o no. ¿Se la envío?" usa la herramienta create_demo
 "Déjeme pensarlo" → "Claro. El mes gratis no vence hoy, pero se activa desde que crea la cuenta.\n¿Quiere crearla ahora y explorarla cuando tenga tiempo?\n${SIGNUP_URL}"
 "Ya tengo Google Calendar" → "Appril funciona con Google Calendar, no cambia nada — lo conecta encima.\n¿Sus pacientes confirman por WhatsApp hoy?"
 
@@ -438,11 +438,12 @@ Necesitas el nombre para la demo y el handoff. Pídelo cuando haya razón natura
 "Para crearle la demo, ¿cómo lo registro?" · "Para dirigirme bien, ¿cómo le gusta que le llamemos?" · "Para pasarle el contexto al equipo Appril, ¿me confirma su nombre?"
 NO pedir nombre como primera acción de la conversación.
 
-━━━ BOTONES ━━━
+━━━ BOTONES (herramienta send_buttons) ━━━
 
-SOLO en momentos estratégicos de cierre o elección clara:
-[BOTONES: Crear cuenta gratis | Hablar con Appril | Ver demo]
-Máximo 3 botones · máximo 20 caracteres cada uno.
+SOLO en momentos estratégicos de cierre o elección clara, usa la herramienta send_buttons para adjuntar botones quick-reply a tu mensaje de texto de esta misma respuesta.
+NUNCA uses send_buttons sin escribir también el mensaje de texto en la misma respuesta: los botones acompañan tu texto, no lo reemplazan.
+Ejemplo: buttons = ["Crear cuenta gratis", "Hablar con Appril", "Ver demo"].
+Máximo 3 botones · máximo 20 caracteres cada uno · títulos distintos entre sí.
 
 ━━━ ACTIVACIÓN POST REGISTRO ━━━
 
@@ -458,39 +459,21 @@ Si no avanza: "¿Quiere que alguien del equipo Appril lo acompañe 10-15 minutos
 
 ━━━ HANDOFF A MAURICIO ━━━
 
-Incluye [HANDOFF_MAURICIO:nombre] ante cualquiera de estas señales:
+Usa la herramienta handoff_mauricio ante cualquiera de estas señales:
 Pide hablar con persona · demo positiva + quiere empezar · quiere empezar pero tiene dudas · >50 citas/mes · asistente con dolor claro · clínica con varios profesionales · migración desde otro sistema · pregunta privacidad · dos o más objeciones fuertes · pide descuento · plan anual · confundido pero interesado · demo falló con intención alta · vino del diagnóstico con intención alta · agente no segura de la respuesta.
 
 Mensaje al usuario: "Doctor/a, por lo que me cuenta, vale la pena que alguien del equipo Appril lo acompañe directamente. Le paso el contexto a Mauricio García, fundador de Appril, para que no tenga que repetir todo."
 
-Incluir SIEMPRE los dos marcadores:
-1. [HANDOFF_MAURICIO:nombre del lead]
-2. [MAURICIO_MSG]...[/MAURICIO_MSG]
+Al usar la herramienta, pasa SIEMPRE estos parámetros:
+1. lead_name: nombre del lead (o "Desconocido" si no lo tienes)
+2. resumen: contexto breve para Mauricio (COMPACTO, máximo ~500 caracteres — el sistema recorta lo que sobre)
 
-Formato del [MAURICIO_MSG]:
-🔥 HANDOFF APPRIL — Lead [SUPER_HOT/HOT/WARM]
-
-📋 DATOS
-• Nombre: · WhatsApp: · Especialidad: · Ciudad:
-${ctx.fromDiscovery ? "• Fuente: Diagnóstico de Agenda Blindada" : "• Fuente: WhatsApp directo"}
-${ctx.referredByName ? `• Referido por: ${ctx.referredByName}` : ""}
-
-📊 CONTEXTO COMERCIAL
-• Gestión de agenda: [asistente / solo / sistema / WA manual / mixto]
-• Dolor principal: · Objeción principal:
-• Demo viva: [no enviada / confirmó / canceló / no respondió / falló] · Reacción:
-${ctx.fromDiscovery ? "• Diagnóstico: completado · Dolor del diagnóstico: · Pérdida estimada: · Qué le llamó la atención:" : ""}
-
-💡 RECOMENDACIÓN
-• Plan sugerido: [Email / WhatsApp / WhatsApp + Asistente]
-• Razón: · Temperatura: [SUPER_HOT / HOT / WARM]
-
-🎯 PARA MAURICIO
-• Cómo abrir: · Qué NO repetir: · Objeción a cuidar: · Cierre sugerido:
-
-💬 ÚLTIMOS MENSAJES
-Doctor: "[último mensaje]"
-Appril: "[última respuesta]"
+Formato del resumen (compacto, en una sola pieza de texto):
+🔥 Lead [SUPER_HOT/HOT/WARM] · Nombre · Especialidad/Ciudad si los tienes
+${ctx.fromDiscovery ? "· Fuente: Diagnóstico de Agenda Blindada" : "· Fuente: WhatsApp directo"}${ctx.referredByName ? ` · Referido por: ${ctx.referredByName}` : ""}
+· Dolor principal · Objeción principal · Demo viva: [no enviada / confirmó / canceló / no respondió / falló]
+· Plan sugerido: [Email / WhatsApp / WhatsApp + Asistente]
+· Para Mauricio: cómo abrir y qué NO repetir
 
 Si no tienes un dato: "—". Nunca inventar información.
 
@@ -501,7 +484,7 @@ Mantener mentalmente en cada mensaje:
 
 DOLORES A DETECTAR: confirmaciones manuales · cancelaciones tardías · reagendamiento manual · asistente saturada · profesional solo gestionando todo · WA caótico · sistema que no cierra el ciclo · falta de estadísticas.
 
-RESTRICCIONES: Nunca inventar precios. Nunca prometer features no listadas. Nunca presionar más de 3 veces en la misma conversación. Si dice "no" → despedida cálida y parar. Si no sabe algo → "Déjame confirmarte ese detalle." + [HANDOFF_MAURICIO]. El ÚNICO link de registro válido es ${SIGNUP_URL} — nunca uses otra variante (jamás app.appril.co/auth/sign-up).
+RESTRICCIONES: Nunca inventar precios. Nunca prometer features no listadas. Nunca presionar más de 3 veces en la misma conversación. Si dice "no" → despedida cálida y parar. Si no sabe algo → "Déjame confirmarte ese detalle." + herramienta handoff_mauricio. El ÚNICO link de registro válido es ${SIGNUP_URL} — nunca uses otra variante (jamás app.appril.co/auth/sign-up).
 
 ━━━ REGLA FINAL ━━━
 
@@ -583,6 +566,13 @@ function isValidE164(phone: string): boolean {
   return E164_RE.test(phone);
 }
 
+// Trunca un título de botón a 20 caracteres SIN partir surrogate pairs:
+// String.prototype.slice corta por code units UTF-16 y con un emoji cerca del
+// límite puede dejar un lone surrogate que Meta rechaza en payloads interactive.
+function truncateButtonTitle(raw: string): string {
+  return Array.from(raw.trim()).slice(0, 20).join("").trim();
+}
+
 interface ParsedResponse {
   text: string;
   buttons: string[];
@@ -590,6 +580,143 @@ interface ParsedResponse {
   handoffName: string;
   mauricioMsg: string;
   createDemo: boolean;
+}
+
+// ── Tools nativas (Anthropic tool-use) ───────────────────────────────────────
+// Reemplazan a los marcadores de texto [CREATE_DEMO] / [HANDOFF_MAURICIO:...] /
+// [MAURICIO_MSG]...[/MAURICIO_MSG] / [BOTONES: ...]. El parser de marcadores se
+// mantiene como fallback silencioso durante la transición (ver extractAgentResponse).
+const AGENT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "create_demo",
+    description:
+      "Crea la cita demo viva en la agenda del doctor: le llega un WhatsApp real desde el número de pacientes de Appril con botones Confirmar/Cancelar. Úsala cuando el lead acepta ver la demo o la pide explícitamente. El sistema ya maneja cooldowns y duplicados — no necesitas verificarlos.",
+    input_schema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "handoff_mauricio",
+    description:
+      "Escala la conversación a Mauricio García (humano, fundador de Appril). El agente queda pausado para este lead y Mauricio toma el control. Úsala solo en las condiciones de handoff descritas en el prompt.",
+    input_schema: {
+      type: "object",
+      properties: {
+        lead_name: {
+          type: "string",
+          description: "Nombre del lead (o 'Desconocido' si no lo tienes)",
+        },
+        resumen: {
+          type: "string",
+          description:
+            "Contexto breve para Mauricio (compacto, máx ~500 caracteres): temperatura, dolor, objeción, estado de la demo, plan sugerido, cómo abrir",
+        },
+      },
+      required: ["lead_name"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "send_buttons",
+    description:
+      "Adjunta botones quick-reply (1 a 3, máximo 20 caracteres cada uno) al mensaje de texto de esta misma respuesta. Solo en momentos estratégicos de cierre o elección clara.",
+    input_schema: {
+      type: "object",
+      properties: {
+        buttons: {
+          type: "array",
+          items: { type: "string", maxLength: 20 },
+          minItems: 1,
+          maxItems: 3,
+          description: "Textos de los botones quick-reply",
+        },
+      },
+      required: ["buttons"],
+      additionalProperties: false,
+    },
+  },
+];
+
+// Colapsa whitespace (incluidos saltos de línea) y elimina asteriscos del nombre que
+// reporta el modelo: ese valor se interpola en la parte determinista del resumen a
+// Mauricio y no debe poder imitar campos verificados (*Teléfono:* …) vía inyección.
+function sanitizeLeadName(name: string): string {
+  return name.replace(/\*/g, "").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+// Misma lógica anti-inyección para el resumen del modelo (handoff_mauricio.resumen):
+// se interpola entre comillas dentro del mensaje a Mauricio, así que además de quitar
+// asteriscos y colapsar whitespace (impide imitar los campos verificados *X:* en
+// líneas propias), se reemplazan las comillas dobles por simples para que el lead no
+// pueda "cerrar" la cita y continuar fuera de ella.
+function sanitizeModelSummary(summary: string): string {
+  return summary
+    .replace(/\*/g, "")
+    .replace(/"/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
+// Procesa la respuesta de Claude en UNA sola pasada (sin round-trip de tool_result):
+// concatena los bloques text y recoge los tool_use. Después corre TAMBIÉN el parser
+// de marcadores sobre el texto (fallback silencioso: por si el modelo emite el formato
+// viejo). Si una acción llega por ambas vías, gana tool-use; los marcadores se limpian
+// del texto siempre. Guardas en código: no se confía en el schema.
+function extractAgentResponse(content: Anthropic.ContentBlock[]): ParsedResponse {
+  let rawText = "";
+  let createDemo = false;
+  let handoffMauricio = false;
+  let handoffName = "Desconocido";
+  let mauricioMsg = "";
+  let buttons: string[] = [];
+
+  for (const block of content) {
+    if (block.type === "text") {
+      rawText += block.text;
+    } else if (block.type === "tool_use") {
+      const input = (block.input ?? {}) as Record<string, unknown>;
+      if (block.name === "create_demo") {
+        createDemo = true;
+      } else if (block.name === "handoff_mauricio") {
+        handoffMauricio = true;
+        // Sanitizar: lead_name se interpola en la sección DETERMINISTA del resumen a
+        // Mauricio (*Nombre:* …); sin quitar saltos de línea y asteriscos, un lead podría
+        // inyectar por conversación campos falsos con el formato de los verificados.
+        const n = typeof input.lead_name === "string" ? sanitizeLeadName(input.lead_name) : "";
+        if (n) handoffName = n;
+        // Sanitizar también: el resumen se interpola entre comillas en el mensaje a
+        // Mauricio y sin limpieza podría imitar el bloque determinista vía inyección.
+        const r = typeof input.resumen === "string" ? sanitizeModelSummary(input.resumen) : "";
+        if (r) mauricioMsg = r;
+      } else if (block.name === "send_buttons" && buttons.length === 0) {
+        const arr = Array.isArray(input.buttons) ? input.buttons : [];
+        // Deduplicar tras truncar: Meta exige títulos únicos dentro del mensaje y
+        // rechaza el payload interactivo completo si se repiten (dos títulos distintos
+        // pueden colisionar al recortarse a 20 chars).
+        buttons = [...new Set(
+          arr
+            .filter((b): b is string => typeof b === "string")
+            .map(truncateButtonTitle)
+            .filter(Boolean),
+        )].slice(0, 3);
+      }
+    }
+  }
+
+  // Fallback: marcadores de texto (formato viejo). Siempre se limpian del texto.
+  const legacy = parseResponse(rawText);
+  createDemo = createDemo || legacy.createDemo;
+  if (!handoffMauricio && legacy.handoffMauricio) {
+    handoffMauricio = true;
+    handoffName = sanitizeLeadName(legacy.handoffName) || "Desconocido";
+    mauricioMsg = sanitizeModelSummary(legacy.mauricioMsg);
+  }
+  if (buttons.length === 0) buttons = legacy.buttons;
+
+  return { text: legacy.text, buttons, handoffMauricio, handoffName, mauricioMsg, createDemo };
 }
 
 // ── Handler principal ───────────────────────────────────────────────────────
@@ -1067,45 +1194,99 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
 
   const completion = await ai.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 1000,
+    max_tokens: 2000, // tools añaden overhead de JSON en la salida; holgura para texto largo + tool_use
     system: buildSystemPrompt(ctx),
     messages,
+    tools: AGENT_TOOLS,
+    tool_choice: { type: "auto" },
   });
 
-  const raw = completion.content[0].type === "text" ? completion.content[0].text : "";
-  let { text } = parseResponse(raw);
-  const { buttons, handoffMauricio, handoffName, mauricioMsg, createDemo } = parseResponse(raw);
+  // Si la generación se corta por max_tokens en medio de un bloque tool_use, la API
+  // descarta el bloque incompleto de content (los text previos sí llegan): el lead
+  // recibiría un texto que promete un handoff/demo que nunca se disparó, sin rastro.
+  // Se loguea como error para que sea correlacionable en los logs de la función.
+  if (completion.stop_reason === "max_tokens") {
+    console.error(
+      `Claude cortó por max_tokens para lead ${lead.id}: un tool_use en curso pudo perderse (texto prometido sin acción ejecutada). Revisar si hay que subir max_tokens.`,
+    );
+  }
+
+  // UNA sola pasada: texto + tool_use nativos, con parser de marcadores como fallback.
+  const parsed = extractAgentResponse(completion.content);
+  const { buttons, handoffMauricio, handoffName, mauricioMsg, createDemo } = parsed;
+  let text = parsed.text;
 
   // Normaliza cualquier variante del link de registro al oficial. El modelo a veces
   // genera app.appril.co/auth/sign-up (heredado del documento viejo) en vez del CTA real.
   text = fixSignupUrl(text);
 
-  // Enviar respuesta al usuario
-  const sendResult = await sendWA(fromPhone, text, buttons);
-  if (!sendResult.ok) {
-    console.error(`Respuesta del agente NO entregada a lead ${lead.id}: ${sendResult.error}`);
+  // Turno tool-only (stop_reason "tool_use" sin bloque de texto): el diseño es de una
+  // sola pasada sin round-trip de tool_result, así que si el modelo emite solo la
+  // herramienta, el texto que "iba" a escribir nunca se genera. Sin este fallback el
+  // lead quedaba mudo: handoff pausaba el agente en silencio y create_demo le hacía
+  // llegar una cita desde OTRO número sin explicación (handleDemoCreation no anuncia
+  // en el caso de éxito, a propósito). Compensamos con el copy canónico del guion,
+  // que además garantiza que el turno quede registrado como wa_agent_reply.
+  let toolOnlyFallback = false;
+  if (!text.trim()) {
+    if (handoffMauricio) {
+      text = `Doctor/a, por lo que me cuenta, vale la pena que alguien del equipo Appril lo acompañe directamente. Le paso el contexto a Mauricio García, fundador de Appril, para que no tenga que repetir todo.`;
+      toolOnlyFallback = true;
+    } else if (createDemo && !demoRecentlyCreated) {
+      text = `Le voy a mostrar algo en vivo, doctor/a.\nEn unos segundos le va a llegar un WhatsApp desde el número de pacientes de Appril — no desde este chat.\nTóquelo como si usted fuera el paciente.`;
+      toolOnlyFallback = true;
+    } else if (createDemo && demoRecentlyCreated) {
+      // Guarda anti-doble-disparo activa: la demo NO se recrea (abajo), pero callar
+      // dejaría en silencio total al doctor que acaba de insistir ("no me llegó").
+      // Copy neutro que no promete un reenvío que no va a ocurrir.
+      text = `La demo ya salió hace un momento, doctor/a — le llega por WhatsApp desde el número de pacientes de Appril, no desde este chat.\nDele unos segundos y revise de nuevo; si no le aparece, me avisa y se la reenvío.`;
+      toolOnlyFallback = true;
+    } else if (buttons.length > 0) {
+      // Turno send_buttons-only: sin body, Meta rechaza el payload interactivo y el
+      // turno desaparecía entero (ni envío ni wa_agent_reply). Texto mínimo de cierre
+      // para que los botones salgan y el turno quede en el historial.
+      text = `¿Cómo prefiere continuar, doctor/a?`;
+      toolOnlyFallback = true;
+    }
   }
 
-  // FIX 3 — Guardar wa_agent_reply INMEDIATAMENTE después de enviar
-  // Esto garantiza que el contexto esté disponible si el usuario responde rápido,
-  // independientemente de cuánto tarde handleDemoCreation o el handoff.
-  // Se registra el resultado real del envío (send_ok/send_error) para no marcar
-  // como entregado algo que falló, y el wa_message_id para correlacionar receipts.
-  await sb.from("lead_events").insert({
-    workspace_id: WORKSPACE_ID,
-    lead_id: lead.id,
-    event_type: "wa_agent_reply",
-    event_channel: "whatsapp",
-    event_value: text,
-    metadata: {
-      buttons,
-      handoff: handoffMauricio,
-      model: "claude-sonnet-4-6",
-      send_ok: sendResult.ok,
-      ...(sendResult.error ? { send_error: sendResult.error } : {}),
-      ...(sendResult.waMessageId ? { wa_message_id: sendResult.waMessageId } : {}),
-    },
-  });
+  // Enviar respuesta al usuario.
+  let sendResult: { ok: boolean; error?: string; waMessageId?: string | null; buttonsDegraded?: boolean } = { ok: true, waMessageId: null };
+  if (text.trim()) {
+    sendResult = await sendWA(fromPhone, text, buttons);
+    if (!sendResult.ok) {
+      console.error(`Respuesta del agente NO entregada a lead ${lead.id}: ${sendResult.error}`);
+    }
+
+    // FIX 3 — Guardar wa_agent_reply INMEDIATAMENTE después de enviar
+    // Esto garantiza que el contexto esté disponible si el usuario responde rápido,
+    // independientemente de cuánto tarde handleDemoCreation o el handoff.
+    // Se registra el resultado real del envío (send_ok/send_error) para no marcar
+    // como entregado algo que falló, y el wa_message_id para correlacionar receipts.
+    await sb.from("lead_events").insert({
+      workspace_id: WORKSPACE_ID,
+      lead_id: lead.id,
+      event_type: "wa_agent_reply",
+      event_channel: "whatsapp",
+      event_value: text,
+      metadata: {
+        // Botones EFECTIVOS: si sendWA degradó a texto plano (>1024 chars), el lead
+        // no recibió botones y registrarlos como enviados mentiría al inbox/embudo.
+        buttons: sendResult.buttonsDegraded ? [] : buttons,
+        ...(sendResult.buttonsDegraded ? { buttons_degraded: true, buttons_dropped: buttons } : {}),
+        handoff: handoffMauricio,
+        model: "claude-sonnet-4-6",
+        send_ok: sendResult.ok,
+        ...(sendResult.error ? { send_error: sendResult.error } : {}),
+        ...(sendResult.waMessageId ? { wa_message_id: sendResult.waMessageId } : {}),
+        ...(toolOnlyFallback ? { via: "tool_only_fallback" } : {}),
+      },
+    });
+  } else {
+    // Con los fallbacks de arriba (handoff, create_demo con/sin guarda, buttons),
+    // llegar aquí significa respuesta realmente vacía: ni texto ni tool_use accionable.
+    console.error(`Respuesta vacía del modelo para lead ${lead.id} (sin texto ni tool_use accionable) — no se envía nada.`);
+  }
 
   // Post-procesamiento (no bloquea el contexto del siguiente mensaje).
   // Guarda corta anti-doble-disparo (no el cooldown largo): si el doctor INSISTE
@@ -1115,11 +1296,28 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   }
 
   if (handoffMauricio) {
-    // Usar el resumen generado por Claude si existe; fallback al generado por código
-    const summary = mauricioMsg.trim()
-      ? mauricioMsg.trim()
-      : buildMauricioSummary(handoffName, disc, userText, ctx);
-    await sendWA(`+${MAURICIO_WA}`, summary, []);
+    // El resumen a Mauricio SIEMPRE parte de los datos deterministas de la BD
+    // (nombre, teléfono, segmento…) construidos en código: sin el teléfono en el
+    // texto no hay forma de contactar al lead (el WA llega desde el número del CRM).
+    // El resumen del modelo se adjunta como CITA marcada, nunca como el mensaje en
+    // sí — un lead podría inyectar por conversación contenido arbitrario que
+    // llegaría por el canal legítimo sin nada que lo distinga.
+    const base = buildMauricioSummary(handoffName, disc, userText, ctx);
+    const modelSummary = mauricioMsg.trim();
+    let summary = modelSummary
+      ? `${base}\n\n🤖 *Resumen del agente (no verificado):*\n"${modelSummary}"`
+      : base;
+    // Cinturón final: un mensaje de texto de la Cloud API admite máx 4096 chars;
+    // si se excede, Meta rechaza y el handoff se perdería completo.
+    if (summary.length > 4000) summary = `${summary.slice(0, 4000)}…`;
+    // Verificar el envío: si Meta lo rechaza, el lead quedaría pausado sin que
+    // Mauricio reciba el contexto. Se loguea y se registra en el evento auditable
+    // para que la revisión/watchdog lo detecte (el agente se pausa igual: ya le
+    // prometió el handoff al lead y no debe seguirle hablando en paralelo).
+    const handoffSend = await sendWA(`+${MAURICIO_WA}`, summary, []);
+    if (!handoffSend.ok) {
+      console.error(`Handoff NO entregado a Mauricio para lead ${lead.id}: ${handoffSend.error}`);
+    }
 
     // Handoff real: pausar el agente para que Mauricio tome el control sin que el
     // bot le siga hablando al lead en paralelo. Registrar evento auditable.
@@ -1132,6 +1330,8 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
       event_value: (handoffName && handoffName !== "Desconocido") ? handoffName : ctx.name,
       metadata: {
         to:                   MAURICIO_WA,
+        handoff_send_ok:      handoffSend.ok,
+        ...(handoffSend.error ? { handoff_send_error: handoffSend.error } : {}),
         from_discovery:       ctx.fromDiscovery,
         discovery_lead_id:    ctx.discoveryLeadId ?? null,
         marketing_segment:    ctx.segment,
@@ -1178,10 +1378,8 @@ function parseResponse(raw: string): ParsedResponse {
   const buttons: string[] = [];
 
   if (btnMatch) {
-    btnMatch[1]
-      .split("|")
-      .map((b) => b.trim().slice(0, 20))
-      .filter(Boolean)
+    // Deduplicar tras truncar (Meta exige títulos únicos dentro del mensaje).
+    [...new Set(btnMatch[1].split("|").map(truncateButtonTitle).filter(Boolean))]
       .slice(0, 3)
       .forEach((b) => buttons.push(b));
   }
@@ -1320,6 +1518,10 @@ async function handleDemoCreation(lead: any, fromPhone: string, sb: any) {
 
 function buildMauricioSummary(capturedName: string, disc: any, lastMsg: string, ctx: LeadContext): string {
   const displayName = (capturedName && capturedName !== "Desconocido") ? capturedName : ctx.name;
+  // Un mensaje WA entrante puede traer hasta 4096 chars; interpolarlo completo puede
+  // empujar el resumen por encima del límite de 4096 de un mensaje de texto de la
+  // Cloud API y Meta rechazaría el handoff entero. Se recorta a 500 chars.
+  const lastMsgShort = lastMsg.length > 500 ? `${lastMsg.slice(0, 500)}…` : lastMsg;
   const demoStatus = ctx.demoAlreadyCreated
     ? (ctx.demoOutcome === "confirm" ? "vivió y CONFIRMÓ"
       : ctx.demoOutcome === "cancel" ? "vivió y canceló"
@@ -1339,20 +1541,36 @@ ${ctx.annualLostLocal ? `*Oportunidad estimada:* ${ctx.annualLostLocal}/año` : 
 ${ctx.ctaIntent ? `*CTA clickeado:* ${ctx.ctaIntent}` : ""}
 *Demo viva:* ${demoStatus}
 
-*Último mensaje:* "${lastMsg}"
+*Último mensaje:* "${lastMsgShort}"
 
 *Próximo paso:* Conectar con el profesional para aterrizarlo a su caso.${ctx.fromDiscovery ? " No repetir el diagnóstico — ya lo vio." : ""}`;
 }
 
 // ── Enviar WhatsApp ──────────────────────────────────────────────────────────
 
-async function sendWA(to: string, text: string, buttons: string[]): Promise<{ ok: boolean; error?: string; waMessageId?: string | null }> {
+async function sendWA(to: string, text: string, buttons: string[]): Promise<{ ok: boolean; error?: string; waMessageId?: string | null; buttonsDegraded?: boolean }> {
   const phone = to.replace(/^\+/, "");
   const url = `https://graph.facebook.com/${WA_API_VERSION}/${WA_PHONE_ID}/messages`;
 
   let body: any;
 
-  if (buttons.length >= 2) {
+  // El body de un mensaje interactive tiene límite de 1024 chars en la Cloud API
+  // (el texto plano admite 4096). Si el texto excede, degradar a texto plano sin
+  // botones (con log) en vez de dejar que Meta rechace el mensaje completo y el
+  // lead no reciba NADA — justo en los cierres largos, donde más duele.
+  // La degradación se devuelve al llamador (buttonsDegraded) para que el evento
+  // wa_agent_reply no registre como enviados botones que el lead nunca recibió.
+  let buttonsDegraded = false;
+  if (buttons.length >= 1 && text.length > 1024) {
+    console.warn(`sendWA → ${to}: texto de ${text.length} chars excede el límite interactive (1024); se degrada a texto plano y se descartan ${buttons.length} botón(es) (${JSON.stringify(buttons)}).`);
+    buttons = [];
+    buttonsDegraded = true;
+  }
+
+  // Meta Cloud API soporta 1 a 3 reply buttons — coherente con el schema de la
+  // tool send_buttons (minItems: 1). Antes se exigían >= 2 y un solo botón se
+  // degradaba en silencio a texto plano, perdiéndose sin log.
+  if (buttons.length >= 1) {
     body = {
       messaging_product: "whatsapp",
       to: phone,
@@ -1395,7 +1613,7 @@ async function sendWA(to: string, text: string, buttons: string[]): Promise<{ ok
     const err = data?.error?.message ?? `HTTP ${res.status}`;
     const code = data?.error?.code ?? res.status;
     console.error(`sendWA fallo → ${to} [${code}]: ${err}`);
-    return { ok: false, error: `${code}: ${err}` };
+    return { ok: false, error: `${code}: ${err}`, buttonsDegraded };
   }
-  return { ok: true, waMessageId: data?.messages?.[0]?.id ?? null };
+  return { ok: true, waMessageId: data?.messages?.[0]?.id ?? null, buttonsDegraded };
 }
