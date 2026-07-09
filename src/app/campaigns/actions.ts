@@ -100,12 +100,17 @@ export async function launchCampaign(
   // 1. Carga la campaña
   const { data: campaign } = await supabase
     .from('campaigns')
-    .select('id, workspace_id, channel, template_keys, segment_filter, scheduled_at, status')
+    .select('id, workspace_id, channel, template_keys, segment_filter, scheduled_at, status, approved_at')
     .eq('id', campaignId)
     .single();
 
   if (!campaign) return { error: 'Campaña no encontrada' };
   if (campaign.status !== 'draft') return { error: 'Solo se pueden lanzar campañas en borrador' };
+  // Candado de aprobación humana: mismo requisito que crm_launch_campaign (vía MCP/SQL).
+  // Ningún camino puede encolar masivos sin approved_at en la BD.
+  if (!campaign.approved_at) {
+    return { error: 'Falta aprobación humana: la campaña no tiene approved_at. Apruébala antes de lanzar.' };
+  }
 
   const templateKey = campaign.template_keys[0];
   if (!templateKey) return { error: 'La campaña no tiene template asignado' };

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { sendSingleMessage } from './actions';
 
 type Template = { template_key: string; name: string; channel: string };
 
@@ -26,26 +27,17 @@ export function SendForm({ templates }: { templates: Template[] }) {
 
   async function enqueue() {
     if (!selected || !templateKey) return;
-    const tpl = templates.find(t => t.template_key === templateKey);
-    if (!tpl) return;
-    const to = tpl.channel === 'email' ? selected.email : selected.phone;
-    if (!to) { setFeedback('El lead no tiene dirección en ese canal.'); return; }
 
     startTransition(async () => {
-      const supabase = createClient();
-      const { data: u } = await supabase.from('crm_users').select('workspace_id').limit(1).single();
-      const { error } = await supabase.from('message_queue').insert({
-        workspace_id: u?.workspace_id,
-        lead_id: selected.id,
-        template_key: tpl.template_key,
-        channel: tpl.channel,
-        to_address: to,
-        triggered_by: 'manual',
-        scheduled_at: new Date().toISOString()
-      });
-      setFeedback(error ? `Error: ${error.message}` : `✓ Encolado para ${selected.full_name ?? to}`);
-      setSelected(null);
-      setTemplateKey('');
+      // El envío pasa por el server action con guardas (opt-out, E.164, template activo).
+      const res = await sendSingleMessage(selected.id, templateKey);
+      if ('error' in res) {
+        setFeedback(`Error: ${res.error}`);
+      } else {
+        setFeedback(`✓ Encolado para ${selected.full_name ?? res.to}`);
+        setSelected(null);
+        setTemplateKey('');
+      }
     });
   }
 
