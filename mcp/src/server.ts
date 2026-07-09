@@ -13,6 +13,7 @@ import { searchLeads, getLead, leadTimeline } from "./lib/leads.js";
 import { inboxThreads, getConversation } from "./lib/inbox.js";
 import { getReport } from "./lib/reports.js";
 import { agentHealth } from "./lib/health.js";
+import { updateLeadStage, updateLead, addLeadNote, createLeadTask, completeLeadTask, setAgentPaused } from "./lib/leadsWrite.js";
 
 type Result = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -252,6 +253,48 @@ export function buildServer(): McpServer {
       inputSchema: { status: z.enum(["open", "notified", "resolved"]).optional(), limit: z.number().int().optional().describe("Default 20, máx 100.") },
     },
     wrap(agentHealth));
+
+  // ── Escrituras acotadas sobre leads (jamás tocan message_queue ni envían) ──
+  server.registerTool("update_lead_stage",
+    {
+      description: "Mueve un lead de etapa del pipeline (valida contra pipeline_stages). Misma semántica que el tablero: update + evento stage_changed auditado.",
+      inputSchema: { lead_id: z.string(), stage: z.string().describe("Clave de etapa, p.ej. new/contacted/engaged/qualified/converted/lost.") },
+    },
+    wrap(updateLeadStage));
+
+  server.registerTool("update_lead",
+    {
+      description: "Edita campos de perfil de un lead (whitelist: full_name, first_name, city, country, specialization, marketing_segment). Consentimiento: solo puede REVOCAR canales (revoke_can_email/revoke_can_whatsapp), jamás habilitarlos.",
+      inputSchema: {
+        lead_id: z.string(),
+        fields: z.record(z.string()).optional(),
+        revoke_can_email: z.boolean().optional(),
+        revoke_can_whatsapp: z.boolean().optional(),
+      },
+    },
+    wrap(updateLead));
+
+  server.registerTool("add_lead_note",
+    { description: "Agrega una nota interna a un lead (tabla lead_notes, visible en el dashboard).", inputSchema: { lead_id: z.string(), body: z.string().min(1) } },
+    wrap(addLeadNote));
+
+  server.registerTool("create_lead_task",
+    {
+      description: "Crea una tarea (status open) para un lead, con vencimiento opcional.",
+      inputSchema: { lead_id: z.string(), title: z.string().min(1), description: z.string().optional(), due_at: z.string().optional().describe("ISO 8601") },
+    },
+    wrap(createLeadTask));
+
+  server.registerTool("complete_lead_task",
+    { description: "Completa una tarea (o la reabre con reopen=true).", inputSchema: { task_id: z.string(), reopen: z.boolean().optional() } },
+    wrap(completeLeadTask));
+
+  server.registerTool("set_agent_paused",
+    {
+      description: "Pausa (paused=true) o reanuda (paused=false) el agente IA comercial para un lead concreto. Auditado en lead_events. Pausar = el agente registra inbound pero no responde.",
+      inputSchema: { lead_id: z.string(), paused: z.boolean(), reason: z.string().optional() },
+    },
+    wrap(setAgentPaused));
 
   // ── Prueba (única vía de envío real del MCP, a allowlist) ──────────────────
   server.registerTool("send_test",

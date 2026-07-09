@@ -39,8 +39,11 @@ export async function searchLeads(input: SearchLeadsInput) {
 export async function getLead(input: { lead_id?: string; email?: string; phone?: string }) {
   let q = ws(db.from("leads_master").select(LEAD_COLS));
   if (input.lead_id) q = q.eq("id", input.lead_id);
-  else if (input.email) q = q.eq("email_normalized", input.email.trim().toLowerCase());
-  else if (input.phone) q = q.eq("phone", input.phone.trim());
+  else if (input.email) {
+    // email_normalized puede venir NULL en leads históricos/sintéticos.
+    const e = input.email.trim().toLowerCase();
+    q = q.or(`email_normalized.eq.${e},email.ilike.${e}`);
+  } else if (input.phone) q = q.eq("phone", input.phone.trim());
   else throw new Error("Indica lead_id, email o phone.");
   const { data: lead, error } = await q.maybeSingle();
   if (error) throw new Error(error.message);
@@ -52,9 +55,9 @@ export async function getLead(input: { lead_id?: string; email?: string; phone?:
       .eq("lead_id", leadId)
       .order("created_at", { ascending: false })
       .limit(10),
-    db.from("lead_tasks").select("id, title, due_at, done")
+    db.from("lead_tasks").select("id, title, due_at, status")
       .eq("lead_id", leadId)
-      .eq("done", false)
+      .neq("status", "done")
       .limit(10),
   ]);
   return { found: true, lead, recent_events: events ?? [], open_tasks: tasks ?? [] };
