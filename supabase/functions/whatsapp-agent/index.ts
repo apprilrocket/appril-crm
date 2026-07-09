@@ -802,19 +802,29 @@ serve(async (req) => {
 
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256") ?? "";
+  const fwdSignature = req.headers.get("x-crm-signature") ?? "";
+  const FORWARD_SECRET = Deno.env.get("CRM_FORWARD_SECRET") ?? "";
   if (WA_APP_SECRET && signature) {
-    // Firma presente: se valida SIEMPRE (comparación en tiempo constante).
+    // Entrega directa de Meta (app "Appril CRM"): firma presente se valida
+    // SIEMPRE (comparación en tiempo constante).
     const expected = "sha256=" + createHmac("sha256", WA_APP_SECRET).update(rawBody).digest("hex");
     if (!timingSafeEqualStr(signature, expected)) {
       return new Response("Invalid signature", { status: 401 });
     }
+  } else if (FORWARD_SECRET && fwdSignature) {
+    // Reenvío del router de appril-web (única entrega tras la Fase A): firmado
+    // con el secret compartido CRM_FORWARD_SECRET sobre el cuerpo crudo.
+    const expected = "sha256=" + createHmac("sha256", FORWARD_SECRET).update(rawBody).digest("hex");
+    if (!timingSafeEqualStr(fwdSignature, expected)) {
+      return new Response("Invalid forward signature", { status: 401 });
+    }
   } else {
-    // Cierre del fail-open: sin header o sin secret, antes se procesaba sin
-    // verificar. Log-only mientras WA_HMAC_ENFORCE!=true; al encenderlo,
-    // todo POST sin firma válida se rechaza (fail-closed).
+    // Cierre del fail-open: sin ninguna firma válida disponible, antes se
+    // procesaba sin verificar. Log-only mientras WA_HMAC_ENFORCE!=true; al
+    // encenderlo, todo POST sin firma se rechaza (fail-closed).
     const enforce = (Deno.env.get("WA_HMAC_ENFORCE") ?? "false") === "true";
     console.warn(
-      `[whatsapp-agent] POST sin verificación HMAC (secret=${WA_APP_SECRET ? "sí" : "no"}, header=${signature ? "sí" : "no"})` +
+      `[whatsapp-agent] POST sin verificación HMAC (meta_secret=${WA_APP_SECRET ? "sí" : "no"}, meta_header=${signature ? "sí" : "no"}, fwd_secret=${FORWARD_SECRET ? "sí" : "no"}, fwd_header=${fwdSignature ? "sí" : "no"})` +
       (enforce ? " — rechazado 401" : " — log-only, se procesa igual"),
     );
     if (enforce) return new Response("Unauthorized", { status: 401 });
