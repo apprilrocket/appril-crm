@@ -12,9 +12,36 @@ const WORKSPACE_ID    = "e2096477-fa6a-4b8f-a8b3-bd46ad720167";
 const SIGNUP_URL = "https://www.appril.co/empezar";
 const DEMO_URL   = "https://cal.com/appril/15min";
 
+// Auth del caller: appril-web (patient-confirmation-handler) manda
+// x-callback-secret = SALES_DEMO_CALLBACK_SECRET. Mientras ENFORCE sea false
+// solo se registra el resultado (log-only); al encender DEMO_CALLBACK_ENFORCE
+// los callbacks sin secret válido se rechazan con 401.
+const CALLBACK_SECRET = Deno.env.get("DEMO_CALLBACK_SECRET") ?? "";
+const ENFORCE = (Deno.env.get("DEMO_CALLBACK_ENFORCE") ?? "false") === "true";
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
+  }
+
+  const provided = req.headers.get("x-callback-secret") ?? "";
+  const secretOk = CALLBACK_SECRET.length > 0 && timingSafeEqual(provided, CALLBACK_SECRET);
+  if (!secretOk) {
+    console.warn(
+      `[demo-callback] secret ${provided ? "inválido" : "ausente"} (configurado=${CALLBACK_SECRET ? "sí" : "no"})` +
+      (ENFORCE ? " — rechazado 401" : " — log-only, se procesa igual"),
+    );
+    if (ENFORCE) return new Response("Unauthorized", { status: 401 });
   }
 
   // Responder 200 rápido — procesar async
