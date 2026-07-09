@@ -20,6 +20,17 @@ const APPRIL_DEMO_URL  = "https://gfpdrqqsaqifyepvmwpt.supabase.co/functions/v1/
 const DEMO_CALLBACK_URL = "https://hwiocriejizjdqqcfrsj.supabase.co/functions/v1/demo-callback";
 const APPRIL_DEMO_SECRET = Deno.env.get("APPRIL_DEMO_SECRET")!;
 
+// Comparación en tiempo constante para firmas HMAC.
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
+}
+
 // ── Sistema ─────────────────────────────────────────────────────────────────
 
 function buildSystemPrompt(ctx: LeadContext): string {
@@ -629,10 +640,21 @@ serve(async (req) => {
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256") ?? "";
   if (WA_APP_SECRET && signature) {
+    // Firma presente: se valida SIEMPRE (comparación en tiempo constante).
     const expected = "sha256=" + createHmac("sha256", WA_APP_SECRET).update(rawBody).digest("hex");
-    if (signature !== expected) {
+    if (!timingSafeEqualStr(signature, expected)) {
       return new Response("Invalid signature", { status: 401 });
     }
+  } else {
+    // Cierre del fail-open: sin header o sin secret, antes se procesaba sin
+    // verificar. Log-only mientras WA_HMAC_ENFORCE!=true; al encenderlo,
+    // todo POST sin firma válida se rechaza (fail-closed).
+    const enforce = (Deno.env.get("WA_HMAC_ENFORCE") ?? "false") === "true";
+    console.warn(
+      `[whatsapp-agent] POST sin verificación HMAC (secret=${WA_APP_SECRET ? "sí" : "no"}, header=${signature ? "sí" : "no"})` +
+      (enforce ? " — rechazado 401" : " — log-only, se procesa igual"),
+    );
+    if (enforce) return new Response("Unauthorized", { status: 401 });
   }
 
   const payload = JSON.parse(rawBody);
