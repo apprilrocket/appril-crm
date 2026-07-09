@@ -9,6 +9,10 @@ import { previewAudience, createCampaign, scheduleCampaign, listCampaigns, getCa
 import { listAutomations, getAutomation, createAutomation, updateAutomation } from "./lib/automations.js";
 import { queueStatus, campaignStats } from "./lib/monitoring.js";
 import { sendTest } from "./lib/test.js";
+import { searchLeads, getLead, leadTimeline } from "./lib/leads.js";
+import { inboxThreads, getConversation } from "./lib/inbox.js";
+import { getReport } from "./lib/reports.js";
+import { agentHealth } from "./lib/health.js";
 
 type Result = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -186,6 +190,68 @@ export function buildServer(): McpServer {
       },
     },
     wrap(updateAutomation));
+
+  // ── Lecturas del CRM (leads, inbox, reportes, salud) — solo lectura ────────
+  server.registerTool("search_leads",
+    {
+      description: "Busca leads por texto (nombre/email/teléfono) y filtros (segmento, etapa, ciudad, especialización, flags de canal). Solo lectura.",
+      inputSchema: {
+        q: z.string().optional(),
+        segment: z.enum(["SUPER_HOT", "HOT", "WARM", "COLD"]).optional(),
+        stage: z.string().optional(),
+        city: z.string().optional(),
+        specialization: z.string().optional(),
+        can_email: z.boolean().optional(),
+        can_whatsapp: z.boolean().optional(),
+        limit: z.number().int().optional().describe("Default 20, máx 100."),
+      },
+    },
+    wrap(searchLeads));
+
+  server.registerTool("get_lead",
+    {
+      description: "Devuelve un lead (por lead_id, email o phone) con sus últimos 10 eventos y tareas abiertas. Solo lectura.",
+      inputSchema: { lead_id: z.string().optional(), email: z.string().optional(), phone: z.string().optional() },
+    },
+    wrap(getLead));
+
+  server.registerTool("lead_timeline",
+    {
+      description: "Timeline completo de eventos (lead_events) de un lead, más reciente primero. Solo lectura.",
+      inputSchema: { lead_id: z.string(), limit: z.number().int().optional().describe("Default 50, máx 200.") },
+    },
+    wrap(leadTimeline));
+
+  server.registerTool("inbox_threads",
+    {
+      description: "Hilos del inbox unificado (misma RPC que el dashboard): último inbound/outbound, unread, ventana de 24h (last_wa_reply_at), flags de canal. Solo lectura.",
+      inputSchema: { limit: z.number().int().optional().describe("Default 20, máx 100.") },
+    },
+    wrap(inboxThreads));
+
+  server.registerTool("get_conversation",
+    {
+      description: "Conversación completa de un lead (burbujas con receipts) + estado calculado de la ventana de 24h de Meta (open/expires_at). Solo lectura.",
+      inputSchema: { lead_id: z.string() },
+    },
+    wrap(getConversation));
+
+  server.registerTool("get_report",
+    {
+      description: "Reportes agregados del CRM: funnel (leads por etapa), channel_stats (enviado/entregado/abierto/click/respuesta/fallo por canal), activity_daily (outbound/inbound por día), quality_summary (calidad de datos de leads). Solo lectura.",
+      inputSchema: {
+        report: z.enum(["funnel", "channel_stats", "activity_daily", "quality_summary"]),
+        days: z.number().int().optional().describe("Ventana en días para channel_stats (default 30) y activity_daily (default 14)."),
+      },
+    },
+    wrap(getReport));
+
+  server.registerTool("agent_health",
+    {
+      description: "Incidentes del watchdog de los agentes WhatsApp (agent_health_incidents): canary_down, wa_no_reply, colas atascadas, rachas de fallos. Incluye conteo de abiertos ahora. Solo lectura.",
+      inputSchema: { status: z.enum(["open", "notified", "resolved"]).optional(), limit: z.number().int().optional().describe("Default 20, máx 100.") },
+    },
+    wrap(agentHealth));
 
   // ── Prueba (única vía de envío real del MCP, a allowlist) ──────────────────
   server.registerTool("send_test",
