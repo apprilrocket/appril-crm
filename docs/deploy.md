@@ -66,13 +66,16 @@ supabase functions deploy demo-callback   --use-api
 ### Secrets de WhatsApp — dos consumidores, no uno
 
 > ⚠️ **`WA_ACCESS_TOKEN` no vive solo en los secrets de este proyecto Supabase.** Lo
-> consumen las Edge Functions del CRM (`whatsapp-agent`, `inbox-send`, `demo-callback`)
+> consumen las Edge Functions del CRM (`whatsapp-agent`, `inbox-send`, `demo-callback` y,
+> desde la Fase B del 2026-07-09, `queue-sender`, que drena `message_queue`)
 > **y también** el Lambda `appril-crm-sender` en AWS us-east-1 (`appril-sender/src/whatsapp.ts:5`).
-> Al rotar el token hay que actualizar **ambos sitios**. Si actualizas solo Supabase, el
-> `whatsapp-agent` responde y su health check `?health=1` da `meta_token_valid:true`
-> (verde), pero la cola `message_queue` que drena el Lambda sigue rechazada por Meta en
-> silencio. Fue exactamente el incidente del **2026-07-09** (token de la app de Meta
-> equivocada, sin acceso al `phone_number_id` comercial → Meta `error_code 100`, NO 190).
+> El Lambda está APAGADO como drenador desde la Fase B (EventBridge DISABLED) pero conserva
+> sus env vars y sigue siendo la reversa: **al rotar el token hay que actualizar ambos sitios
+> mientras el Lambda exista**, o la reversa nace rota. El antecedente es el incidente del
+> **2026-07-09**: se actualizó solo Supabase, el `whatsapp-agent` respondía y su health check
+> `?health=1` daba `meta_token_valid:true` (verde), pero la cola que entonces drenaba el
+> Lambda seguía rechazada por Meta en silencio (token de la app equivocada, sin acceso al
+> `phone_number_id` comercial → Meta `error_code 100`, NO 190).
 > Distinción útil: **100** = objeto/permiso inexistente (token de la app equivocada);
 > **190** = token expirado. Los system-user tokens no caducan solos.
 
