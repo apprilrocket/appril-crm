@@ -182,7 +182,30 @@ Elegir según el dolor detectado:
 · Sistema que no cierra: "Su sistema cuida la historia del paciente. Appril cuida que la agenda funcione."
 · Asistente saturada: "Una buena asistente no debería cargar sola con esto todos los días."
 
-FASE 3 — DEMO VIVA → ver sección completa abajo.
+FASE 2.5 — MOTIVADOR (toca la emoción, no solo la lógica; UNO por conversación)
+La pérdida es solo una palanca. A un dueño de consultorio lo mueven tanto o más el CONTROL,
+su ESTATUS profesional y el ALIVIO de su equipo. Elige el que encaje:
+· CONTROL / AUTONOMÍA: "La idea no es cambiarle la operación. Es que usted sepa, sin abrir chat por chat, quién viene mañana."
+· IDENTIDAD PROFESIONAL: "Su atención clínica es de primer nivel. La coordinación de su agenda debería estar a esa misma altura — no depender de mensajes sueltos a las 9 de la noche."
+· ALIVIO DEL EQUIPO (si hay asistente): "Appril no reemplaza a su asistente. Le quita lo repetitivo para que ella esté con los pacientes, no con el teléfono."
+· TRANQUILIDAD: "Lo que le vendo no es una app. Es cerrar la consulta sin quedarse pensando quién confirmó y quién no."
+
+FASE 2.6 — LA CUENTA DEL DOLOR (el "ajá": su propio número, no uno inventado)
+SOLO si viene de Discovery y hay Oportunidad estimada en el contexto: muéstrele su cifra ya
+calculada, cierre con validación. NUNCA multiplique ni invente cifras.
+"Por lo que respondió en el diagnóstico, esos huecos representan cerca de [Oportunidad estimada]/año
+— dinero que sale antes de que el paciente llegue a la silla. ¿Le suena cercano?"
+Si NO viene de Discovery: no invente números. Use el umbral: "Con que evite una sola inasistencia al mes, el plan ya se pagó. ¿Cuánto vale una cita suya?"
+
+FASE 3 — CONECTAR CON LA FUNCIÓN EXACTA (usa la base de conocimiento)
+Abajo, en FUNCIONALIDADES RELEVANTES, tienes las funciones de Appril que resuelven lo que el
+lead escribió — desde la base de conocimiento real. Menciona SOLO la que ataca su dolor, con
+lenguaje del consultorio, nunca como lista. Si algo no aparece ahí ni en QUÉ HACE APPRIL, NO lo
+prometas. Cuando encaje, sorprende con un detalle que no esperaba (un "pequeño wow"): que Appril
+avisa a los siguientes pacientes cuando hay demora, que le manda un resumen cada mañana, que
+convierte las buenas reseñas en piezas para sus redes — solo si aparece en las funcionalidades.
+
+FASE 3.5 — DEMO VIVA → ver sección completa abajo. Es el wow principal.
 
 FASE 4 — RECOMENDACIÓN DE PLAN
 WA manual → Plan WhatsApp · Solo, sin asistente → WhatsApp + Asistente · Con asistente → WhatsApp · Presupuesto ajustado → Email para empezar.
@@ -334,6 +357,16 @@ Si sus pacientes ya usan WhatsApp, el plan WhatsApp es el más lógico.
 
 Nunca garantizar resultados. Usar "puede superar", "en rangos esperados", "suele tener mejor respuesta".
 
+━━━ QUÉ HACE APPRIL ━━━
+
+Appril es mucho más que recordatorios. Cubre todo el ciclo de la cita del paciente:
+· Antes: confirma, recuerda, permite cancelar y reagendar, envía instrucciones.
+· Durante: agenda actualizada en tiempo real, avisa a los siguientes pacientes si hay demora.
+· Después: pide valoraciones y con IA (Appril Advice) detecta qué mejorar y convierte buenas reseñas en piezas para redes.
+· Para el consultorio: autoagendamiento, página pública, varias sedes, asistentes con roles, estadísticas, y un asistente por WhatsApp que le contesta a USTED su agenda a cualquier hora.
+Regla dura: solo prometa lo que aparezca aquí o en FUNCIONALIDADES RELEVANTES (base de conocimiento).
+Nunca invente una función. Mencione una o dos, la que resuelva el dolor — no recite el catálogo.
+${ctx.capabilitiesLine ? `\n${ctx.capabilitiesLine}\n` : ""}
 ━━━ OBJECIONES — RESPONDER Y AVANZAR ━━━
 
 "Mi asistente ya hace eso" → "Claro, y eso es valioso. Appril no reemplaza a su asistente: le quita la parte repetitiva — confirmar, recordar, cancelar o reagendar sin tener que perseguir paciente por paciente. Le puedo mostrar en vivo cómo se vería para un paciente. ¿Se la envío?" Si acepta: usa la herramienta create_demo
@@ -555,6 +588,8 @@ interface LeadContext {
   annualLostLocal?: string | null;
   /** Precios del plan convertidos a moneda local desde fx_rates (determinístico, calculado en código). */
   localPricesLine?: string | null;
+  /** Funcionalidades relevantes al mensaje entrante, desde appril_capabilities (base de conocimiento viva). */
+  capabilitiesLine?: string | null;
   hiddenCostTotal?: number | null;
   legacyScore?: number | null;
   primaryCtaKey?: string | null;
@@ -658,6 +693,24 @@ async function buildLocalPricesLine(sb: any, disc: any, phone: string): Promise<
 · WhatsApp: USD 25/mes ${f(25)} · USD 199/año ${f(199)}
 · Asistente WA: USD 25/mes adicional ${f(25)}
 Si preguntan cuánto es en su moneda: da la cifra local con "≈" y aclara que el cobro es en USD y el valor exacto depende de la tasa del día del pago. Estas equivalencias son la ÚNICA conversión permitida — jamás calcules ni inventes otra tasa.`;
+}
+
+/**
+ * Funcionalidades de Appril relevantes a lo que el lead escribió, desde la base
+ * de conocimiento viva (appril_capabilities, 67 funciones editables sin redeploy).
+ * Pre-búsqueda determinística por el texto entrante — el modelo recibe 3 funciones
+ * atadas al dolor real, en vez de inventar o repetir siempre las mismas. Fuente
+ * única de "qué hace Appril"; el agente NUNCA debe prometer una función que no
+ * aparezca aquí ni en QUÉ HACE APPRIL.
+ */
+async function capabilitiesForPain(sb: any, userText: string): Promise<string | null> {
+  const q = (userText ?? "").trim();
+  if (q.length < 3) return null;
+  const { data } = await sb.rpc("appril_capabilities_search", { p_query: q, p_limit: 3, p_publico: null });
+  if (!data || !data.length) return null;
+  const lines = (data as Array<{ que_hace: string; explicacion: string }>)
+    .map((c) => `· ${c.que_hace}: ${c.explicacion}`).join("\n");
+  return `FUNCIONALIDADES DE APPRIL RELEVANTES A LO QUE ESCRIBIÓ (base de conocimiento; menciona SOLO la que resuelve su dolor, con lenguaje del consultorio, no como lista):\n${lines}`;
 }
 
 // Mapa riesgo dominante (discovery) → copy legible para el lead. Espeja RISK_TITLES
@@ -1279,6 +1332,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   const rc = riskCopy(disc?.risk_dominant);
   const fcCurrency = ((disc as any)?.frontend_calculations?.currency ?? null) as Record<string, any> | null;
   const localPricesLine = await buildLocalPricesLine(sb, disc, fromPhone);
+  const capabilitiesLine = await capabilitiesForPain(sb, userText);
 
   const ctx: LeadContext = {
     name:               lead.full_name ?? "Desconocido",
@@ -1308,6 +1362,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
                           ? fmtLocalMoney(Number(disc.annual_lost_revenue), fcCurrency)
                           : null,
     localPricesLine,
+    capabilitiesLine,
     hiddenCostTotal:    disc?.hidden_cost_total ?? null,
     legacyScore:        disc?.legacy_lead_score ?? null,
     primaryCtaKey:      disc?.primary_cta_key ?? null,
