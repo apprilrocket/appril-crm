@@ -1,6 +1,6 @@
 # Plan de consolidación WhatsApp/Email → Supabase (matar AWS)
 
-> Estado: **Fases A, B, C y D EJECUTADAS el 2026-07-09** (decisión 2026-06-30: hacerlo bien, no rápido). AWS quedó **APAGADO (reversible)**; solo restan dos colas: el **borrado definitivo** de los recursos AWS (tras 24h en cero) y la **rotación del `SUPABASE_SERVICE_ROLE_KEY`** que vivió en las Lambdas (riesgo A5).
+> Estado: **Fases A, B, C y D COMPLETADAS** (decisión 2026-06-30: hacerlo bien, no rápido). Fases A–C el 2026-07-09; **el borrado definitivo de AWS (parte final de la Fase D) se EJECUTÓ el 2026-07-10**: 2 Lambdas, API Gateway `zkb9p2z5je`, regla EventBridge y rol IAM eliminados (verificado en vivo: 0 Lambdas, 0 API Gateways, 0 reglas, rol `NoSuchEntity`). SES y el topic SNS `ses-events-appril-crm` intactos. **Todo el ecosistema corre sin AWS.** Única cola abierta: la **rotación del `SUPABASE_SERVICE_ROLE_KEY` y del `WA_ACCESS_TOKEN`** que vivieron en las Lambdas (riesgo A5 cerrado en infra al borrar; rotación pendiente, de Mauricio — ver `SECURITY-ROTATION.md`).
 > Contexto: ver memoria `whatsapp-inbound-architecture.md`.
 
 ## 1. Arquitectura actual (post-Fases A–D, 2026-07-09)
@@ -29,9 +29,11 @@ OUTBOUND (post-Fase B): CRM → message_queue → pg_cron `queue-sender-tick` (c
 EMAIL EVENTS (post-Fase C): SES → SNS topic `ses-events-appril-crm` → Edge `ses-webhook`
   (hwiocriejizjdqqcfrsj, modo `live`, firma SNS verificada) → lead_events + flags en leads_master.
   El Lambda `appril-crm-webhook` fue DES-SUSCRITO del topic; la Edge es el único suscriptor.
-AWS (post-Fase D): AMBAS Lambdas con reserved-concurrent-executions=0, EventBridge DISABLED.
-  0 invocaciones / 0 throttles. Respaldo + runbook en `appril-sender/aws-backup/`.
-  Pendiente: borrado definitivo (24h en cero) + rotar SUPABASE_SERVICE_ROLE_KEY (A5).
+AWS (post-Fase D, borrado 2026-07-10): 2 Lambdas + API Gateway zkb9p2z5je + regla
+  EventBridge appril-crm-sender-cron + rol IAM appril-crm-lambda-role = TODO BORRADO
+  (verificado: 0 Lambdas, 0 API GW, 0 reglas, rol NoSuchEntity). SES + topic SNS intactos.
+  Respaldo/reversa (restaurar desde cero) en `appril-sender/aws-backup/`.
+  Pendiente: rotar SUPABASE_SERVICE_ROLE_KEY + revocar WA_ACCESS_TOKEN expuesto (A5).
 ```
 
 ## 2. El fix aplicado (y cómo hacerlo permanente)
@@ -69,12 +71,13 @@ El comercial llegaba al agente por 2 apps → los `wa_sent/delivered/read/failed
 3. ✅ **La Fase C cerró DOS vulnerabilidades reales del Lambda**, que no validaba nada: (a) **sin verificación de firma SNS** → un POST forjado con Complaint/Bounce ponía `can_email=false` en leads arbitrarios (destrucción de audiencia); (b) **SSRF**: `fetch(SubscribeURL)` a cualquier URL. La Edge verifica firma RSA contra el certificado de AWS (X.509→SPKI, SHA-1/SHA-256 según `SignatureVersion`), restringe `SigningCertURL`/`SubscribeURL` a `sns.<region>.amazonaws.com` y valida `TopicArn`. Probado: POST forjados → 403; suscripción SNS real confirmada (la firma legítima valida).
 - **Rollback:** repuntar SNS de vuelta al Lambda (sacar concurrencia 0) y re-suscribir.
 
-### Fase D — Apagar AWS ✅ EJECUTADA (2026-07-09) · reversible, pendiente de borrado
-1. ✅ Respaldo completo en `appril-sender/aws-backup/` (commits `bdd52de`/`ba8820d`/`3ba6f0f`): zips con sha256 verificado contra `CodeSha256`, configs SIN valores de env vars, rutas API GW, targets EventBridge, políticas IAM, runbook de restauración/borrado.
-2. ✅ Ambas Lambdas con `reserved-concurrent-executions=0`; EventBridge DISABLED. **Validado con las Lambdas apagadas**: correo real por `queue-sender` → SES → `ses-webhook` escribió delivered+opened; ambas Lambdas 0 invocaciones y 0 throttles.
-3. ⏳ **Pendiente (cuando el contador lleve 24h en cero):** borrado definitivo (Lambdas, API Gateway `zkb9p2z5je`, EventBridge, rol IAM) — comandos en `appril-sender/aws-backup/README.md`.
-4. ⏳ **Pendiente (riesgo A5):** rotar el `SUPABASE_SERVICE_ROLE_KEY` del CRM, que vivió en las env vars de las Lambdas fuera de Supabase. Consumidores a actualizar: `appril-crm/mcp/.env`, dashboard en Vercel (`src/lib/supabase/admin.ts`), scripts locales. Engancha con `SECURITY-ROTATION.md` (rotaciones diferidas al final).
-- **Aclaración:** SES NO se apaga — sigue siendo el proveedor de email, invocado desde `queue-sender` con las credenciales que ya viven en secrets de Supabase. El topic SNS tampoco se borra (apunta a `ses-webhook`). En la cuenta AWS hay otros recursos ajenos a Appril (FALLA_EMAIL, NotificacionCita, cola SEND_MAIL) que NO se tocan.
+### Fase D — Apagar AWS ✅ COMPLETADA · apagado 2026-07-09 → BORRADO 2026-07-10
+1. ✅ Respaldo completo en `appril-sender/aws-backup/` (commits `bdd52de`/`ba8820d`/`3ba6f0f`): zips con sha256 verificado contra `CodeSha256`, configs SIN valores de env vars, rutas API GW, targets EventBridge, políticas IAM, runbook de restauración. **Es ahora la única copia de esa infra.**
+2. ✅ Fase de apagado (2026-07-09): ambas Lambdas con `reserved-concurrent-executions=0`; EventBridge DISABLED. Validado con las Lambdas apagadas: correo real por `queue-sender` → SES → `ses-webhook` escribió delivered+opened; 0 invocaciones y 0 throttles durante 24h.
+3. ✅ **BORRADO DEFINITIVO EJECUTADO Y VERIFICADO EN VIVO (2026-07-10):** eliminados las 2 Lambdas (`appril-crm-sender`, `appril-crm-webhook`), el API Gateway `zkb9p2z5je`, la regla EventBridge `appril-crm-sender-cron` y el rol IAM `appril-crm-lambda-role`. Verificación: **0 Lambdas, 0 API Gateways, 0 reglas, rol `NoSuchEntity`.** El ecosistema corre sin AWS: pg_cron `queue-sender-tick` activo, último envío OK, cola sin atascos.
+   - **Investigación previa (informe AWS del dueño):** los 4 hits del `appril-crm-webhook` en 24h eran los **correos de prueba de las Fases B/C** llegando vía la suscripción SNS del Lambda durante la convivencia con la Edge — benignos, NO un tercero; pararon al des-suscribir el Lambda del topic.
+4. ⏳ **Pendiente (riesgo A5, de Mauricio — consolas web):** con las Lambdas borradas desapareció la copia del `SUPABASE_SERVICE_ROLE_KEY` y del `WA_ACCESS_TOKEN` que vivían fuera de Supabase (riesgo A5 **cerrado a nivel de infra**). La **rotación** sigue pendiente: R1 rotar service_role del CRM + deshabilitar legacy JWT keys; R2 revocar el token WA expuesto `EAAYX6imwYTMBR...`; R3 quitar las 2 apps de tyntec de la WABA. Consumidores del service_role a actualizar: `appril-crm/mcp/.env`, dashboard en Vercel (`src/lib/supabase/admin.ts`), scripts locales. Detalle en `SECURITY-ROTATION.md`.
+- **Aclaración:** SES NO se apagó — sigue siendo el proveedor de email, invocado desde `queue-sender` con las credenciales que ya viven en secrets de Supabase. El topic SNS `ses-events-appril-crm` tampoco se borró (apunta a `ses-webhook`). En la cuenta AWS hay otros recursos ajenos a Appril (FALLA_EMAIL, NotificacionCita, cola SEND_MAIL) que NO se tocaron.
 - Resultado: **todo en Supabase**, sin llave maestra fuera de Supabase una vez rotada.
 
 ## 5. Lo que NO se toca en ninguna fase
@@ -87,4 +90,5 @@ El comercial llegaba al agente por 2 apps → los `wa_sent/delivered/read/failed
 - [x] Campañas se envían (Fase B): `message_queue` drena por la Edge `queue-sender`, `message_attempts` y `lead_events` verificados (email E2E; WA aceptado por Meta con `wamid`, entrega limitada por `131049` al número de prueba — no bug). 2026-07-09.
 - [x] Eventos SES llegan (Fase C): `email_delivered/opened` correlacionados 1:1 por la Edge `ses-webhook` en `live`; POST forjados rechazados con 403. 2026-07-09.
 - [x] AWS apagado sin pérdida de tráfico (Fase D): correo E2E con las Lambdas en concurrencia 0; 0 invocaciones/0 throttles. 2026-07-09.
+- [x] AWS BORRADO por completo (Fase D final): 0 Lambdas, 0 API Gateways, 0 reglas EventBridge, rol IAM `NoSuchEntity`; ecosistema corriendo sin AWS (pg_cron activo, cola sin atascos). 2026-07-10.
 - [x] Agente de pacientes intacto en cada fase (número distinto, nunca tocado).
