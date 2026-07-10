@@ -1,9 +1,9 @@
 # Plan de consolidación WhatsApp/Email → Supabase (matar AWS)
 
-> Estado: **Fases A y B EJECUTADAS y validadas el 2026-07-09 (noche). Fases C–D pendientes** (decisión 2026-06-30: hacerlo bien, no rápido).
+> Estado: **Fases A, B, C y D EJECUTADAS el 2026-07-09** (decisión 2026-06-30: hacerlo bien, no rápido). AWS quedó **APAGADO (reversible)**; solo restan dos colas: el **borrado definitivo** de los recursos AWS (tras 24h en cero) y la **rotación del `SUPABASE_SERVICE_ROLE_KEY`** que vivió en las Lambdas (riesgo A5).
 > Contexto: ver memoria `whatsapp-inbound-architecture.md`.
 
-## 1. Arquitectura actual (post-Fases A y B, 2026-07-09)
+## 1. Arquitectura actual (post-Fases A–D, 2026-07-09)
 
 ```
 NÚMERO COMERCIAL (+57 311 2211772, phone_id 928845203654774, WABA 1446010070564033)
@@ -26,16 +26,19 @@ NÚMERO DE PACIENTES (distinto) → App "Appril" → appril-web/whatsapp-agent (
 
 OUTBOUND (post-Fase B): CRM → message_queue → pg_cron `queue-sender-tick` (cada 2 min)
   → invoke_queue_sender() → Edge `queue-sender` (hwiocriejizjdqqcfrsj) → SES / WA Cloud API.
-  El Lambda appril-crm-sender está APAGADO como drenador (EventBridge
-  `appril-crm-sender-cron` DISABLED); su código sigue en AWS solo como reversa.
-EMAIL EVENTS: SES → SNS → Lambda appril-crm-webhook /webhook/ses → lead_events. (Fase C pendiente.)
+EMAIL EVENTS (post-Fase C): SES → SNS topic `ses-events-appril-crm` → Edge `ses-webhook`
+  (hwiocriejizjdqqcfrsj, modo `live`, firma SNS verificada) → lead_events + flags en leads_master.
+  El Lambda `appril-crm-webhook` fue DES-SUSCRITO del topic; la Edge es el único suscriptor.
+AWS (post-Fase D): AMBAS Lambdas con reserved-concurrent-executions=0, EventBridge DISABLED.
+  0 invocaciones / 0 throttles. Respaldo + runbook en `appril-sender/aws-backup/`.
+  Pendiente: borrado definitivo (24h en cero) + rotar SUPABASE_SERVICE_ROLE_KEY (A5).
 ```
 
 ## 2. El fix aplicado (y cómo hacerlo permanente)
 
 - **Aplicado:** secret `CRM_WEBHOOK_URL = https://hwiocriejizjdqqcfrsj.supabase.co/functions/v1/whatsapp-agent` en el proyecto appril-web (`gfpdrqqsaqifyepvmwpt`), vía `supabase secrets set`. Reversible borrándolo.
 - **Verificado:** agente conversa multi-turno; inbound 100% estructurado, 0 `wa_reply` crudos del Lambda.
-- **Pendiente para hacerlo permanente en código** (no urgente, el secret es durable): cambiar el default hardcodeado en `appril-web/supabase/functions/whatsapp-webhook/index.ts` (línea ~45) de la URL del Lambda a la del agente. ⚠️ NO desplegar appril-web hasta resolver su `main` sucio (tiene cambios de producto sin commit).
+- **RESUELTO EN CÓDIGO (commit `c0dbfee8`, router v50, pusheado):** el default hardcodeado de `CRM_WEBHOOK_URL` en `appril-web/supabase/functions/whatsapp-webhook/index.ts` ya no apunta al API Gateway muerto sino al agente del CRM. Era una mina: si el secret faltara, el inbound comercial se perdía EN SILENCIO (`waitUntil` + 200 OK a Meta, sin reintento). Validado con conversación real (4 mensajes/4 respuestas; el agente cita precios en COP desde `fx_rates`).
 
 ## 3. Duplicación de statuses (cosmética) — RESUELTA con la Fase A
 
@@ -60,17 +63,19 @@ El comercial llegaba al agente por 2 apps → los `wa_sent/delivered/read/failed
 - **Hallazgo colateral (deuda de datos, no de la Fase B):** el template `alerta_interna_wa` (`wa_template_name` `appril_alerta_crm`) está desajustado — Meta espera parámetros en el body pero el registro dice `variables: []` y no tiene `wa_components` → todo envío con payload vacío falla con `132000` (le pasaba igual al Lambda). Corregir el registro o la plantilla en Meta.
 - **Rollback:** `cron.unschedule('queue-sender-tick')` + `aws events enable-rule appril-crm-sender-cron`.
 
-### Fase C — Eventos SES a Supabase (pendiente)
-1. Edge `ses-events` que porte `appril-sender/src/webhook.ts handleSes` (SubscriptionConfirmation + Notification → lead_events + flags en leads_master).
-2. Repuntar la suscripción SNS de la URL del Lambda al edge (1 cambio en AWS console).
-- **Rollback:** repuntar SNS de vuelta al Lambda.
-- **Nota post-Fase B:** el Lambda `appril-crm-webhook` sigue **vivo y necesario** (SES/SNS + verificación WA legacy + `/webhook/external`) hasta que esta fase se ejecute.
+### Fase C — Eventos SES a Supabase ✅ EJECUTADA Y ACTIVA (2026-07-09, modo `live`)
+1. ✅ Edge `ses-webhook` desplegada (commits `93b1eec` sombra + `13c4662` live): porta `appril-sender/src/webhook.ts handleSes` (SubscriptionConfirmation + Notification → `lead_events` + flags en `leads_master`), correlación por `ses_message_id`, mismo mapa de eventos y atribución (`campaign_id`+`template_key`).
+2. ✅ El Lambda `appril-crm-webhook` fue **DES-SUSCRITO** del topic `ses-events-appril-crm`; la Edge es el **único suscriptor**. Validado: paridad 1:1 (delivered+opened, correlación por `ses_message_id`).
+3. ✅ **La Fase C cerró DOS vulnerabilidades reales del Lambda**, que no validaba nada: (a) **sin verificación de firma SNS** → un POST forjado con Complaint/Bounce ponía `can_email=false` en leads arbitrarios (destrucción de audiencia); (b) **SSRF**: `fetch(SubscribeURL)` a cualquier URL. La Edge verifica firma RSA contra el certificado de AWS (X.509→SPKI, SHA-1/SHA-256 según `SignatureVersion`), restringe `SigningCertURL`/`SubscribeURL` a `sns.<region>.amazonaws.com` y valida `TopicArn`. Probado: POST forjados → 403; suscripción SNS real confirmada (la firma legítima valida).
+- **Rollback:** repuntar SNS de vuelta al Lambda (sacar concurrencia 0) y re-suscribir.
 
-### Fase D — Apagar AWS (pendiente)
-1. Confirmar B y C estables varios días.
-2. Desactivar/borrar Lambdas (`appril-crm-sender`, `appril-crm-webhook`), API Gateway, EventBridge cron, suscripción SNS al Lambda.
-3. Quitar la `service_role` key de Supabase que vivía en AWS (endurecimiento que el README de appril-sender ya señalaba).
-- Resultado: **todo en Supabase**, sin factura AWS, sin llave maestra fuera de Supabase.
+### Fase D — Apagar AWS ✅ EJECUTADA (2026-07-09) · reversible, pendiente de borrado
+1. ✅ Respaldo completo en `appril-sender/aws-backup/` (commits `bdd52de`/`ba8820d`/`3ba6f0f`): zips con sha256 verificado contra `CodeSha256`, configs SIN valores de env vars, rutas API GW, targets EventBridge, políticas IAM, runbook de restauración/borrado.
+2. ✅ Ambas Lambdas con `reserved-concurrent-executions=0`; EventBridge DISABLED. **Validado con las Lambdas apagadas**: correo real por `queue-sender` → SES → `ses-webhook` escribió delivered+opened; ambas Lambdas 0 invocaciones y 0 throttles.
+3. ⏳ **Pendiente (cuando el contador lleve 24h en cero):** borrado definitivo (Lambdas, API Gateway `zkb9p2z5je`, EventBridge, rol IAM) — comandos en `appril-sender/aws-backup/README.md`.
+4. ⏳ **Pendiente (riesgo A5):** rotar el `SUPABASE_SERVICE_ROLE_KEY` del CRM, que vivió en las env vars de las Lambdas fuera de Supabase. Consumidores a actualizar: `appril-crm/mcp/.env`, dashboard en Vercel (`src/lib/supabase/admin.ts`), scripts locales. Engancha con `SECURITY-ROTATION.md` (rotaciones diferidas al final).
+- **Aclaración:** SES NO se apaga — sigue siendo el proveedor de email, invocado desde `queue-sender` con las credenciales que ya viven en secrets de Supabase. El topic SNS tampoco se borra (apunta a `ses-webhook`). En la cuenta AWS hay otros recursos ajenos a Appril (FALLA_EMAIL, NotificacionCita, cola SEND_MAIL) que NO se tocan.
+- Resultado: **todo en Supabase**, sin llave maestra fuera de Supabase una vez rotada.
 
 ## 5. Lo que NO se toca en ninguna fase
 - El **agente de pacientes** (appril-web, número distinto).
@@ -80,5 +85,6 @@ El comercial llegaba al agente por 2 apps → los `wa_sent/delivered/read/failed
 - [x] Inbound comercial sigue respondiendo (verificado post-Fase A con conversación real, 2026-07-09 21:37–21:39 UTC).
 - [x] Statuses se registran 1x tras Fase A (verificado en la misma conversación).
 - [x] Campañas se envían (Fase B): `message_queue` drena por la Edge `queue-sender`, `message_attempts` y `lead_events` verificados (email E2E; WA aceptado por Meta con `wamid`, entrega limitada por `131049` al número de prueba — no bug). 2026-07-09.
-- [ ] Eventos SES llegan (Fase C): `email_delivered/opened/clicked/bounced`.
-- [ ] Agente de pacientes intacto en cada fase.
+- [x] Eventos SES llegan (Fase C): `email_delivered/opened` correlacionados 1:1 por la Edge `ses-webhook` en `live`; POST forjados rechazados con 403. 2026-07-09.
+- [x] AWS apagado sin pérdida de tráfico (Fase D): correo E2E con las Lambdas en concurrencia 0; 0 invocaciones/0 throttles. 2026-07-09.
+- [x] Agente de pacientes intacto en cada fase (número distinto, nunca tocado).
