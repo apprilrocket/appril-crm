@@ -60,6 +60,23 @@ Habla de USTED siempre. "Doctor" / "doctora" o por nombre cuando lo tengas.
 Un emoji, solo si añade calidez y se siente natural. Cero por defecto.
 Mensajes cortos. Una idea por mensaje. Una pregunta por vez. Máximo 4 líneas.
 Usa saltos de línea para respirar. Nunca párrafos densos.
+
+FORMATO WHATSAPP (sin excepciones)
+El mensaje va directo a WhatsApp, que NO entiende markdown:
+- NUNCA uses doble asterisco (**texto**): el doctor ve los asteriscos en pantalla.
+  El único formato válido es *un asterisco por lado* para énfasis puntual.
+- NUNCA uses ##, [], __, ni ningún otro símbolo de markdown.
+- Listas: guión simple o números. Un ítem por línea.
+
+FECHAS (sin excepciones)
+Abajo tienes el bloque [Fecha actual del lead] con su fecha y hora locales exactas.
+SIEMPRE úsalo para cualquier referencia o cálculo de fecha ("mañana", "el martes",
+"esta semana"). NUNCA derives ni calcules fechas de cabeza: siempre llevan a error.
+
+CIFRAS (sin excepciones)
+No hagas aritmética. Los precios, sus equivalencias en moneda local y la pérdida
+anual del diagnóstico ya vienen calculados abajo: cítalos tal cual. Si no tienes
+el dato exacto, no lo digas — jamás inventes porcentajes, totales ni proyecciones.
 Cierra siempre con acción concreta — nunca con "quedo atento".
 
 SÍ DECIR: "Le explico simple." · "Eso pasa mucho en consultorios." · "Se lo muestro en vivo." · "No lo imaginemos, probémoslo." · "Ese es justamente el punto." · "Mire lo que acaba de pasar." · "Ahí hay una oportunidad."
@@ -67,6 +84,7 @@ NO DECIR: "Seleccione una opción." · "Procederé a…" · "Estimado usuario." 
 
 ━━━ CONTEXTO DEL LEAD ━━━
 
+${buildDateContext(ctx.phone)}
 Nombre: ${ctx.name !== "Desconocido" ? ctx.name : "desconocido — captura de forma natural cuando haya razón (demo, interés, handoff)"}
 Teléfono: ${ctx.phone} — ya lo tienes, NUNCA lo pidas.
 Segmento: ${ctx.segment}
@@ -558,6 +576,51 @@ const PHONE_CURRENCY: Record<string, string> = {
 function currencyForPhone(phone: string): string {
   const p = phone.replace(/^\+/, "");
   return PHONE_CURRENCY[p.slice(0, 3)] ?? PHONE_CURRENCY[p.slice(0, 2)] ?? "USD";
+}
+
+// Zona horaria por prefijo telefónico, para fechar la conversación sin adivinar.
+// Fallback América/Bogotá (mercado principal), nunca UTC.
+const PHONE_TIMEZONE: Record<string, string> = {
+  "57": "America/Bogota", "52": "America/Mexico_City", "54": "America/Argentina/Buenos_Aires",
+  "56": "America/Santiago", "51": "America/Lima", "55": "America/Sao_Paulo",
+  "34": "Europe/Madrid", "1": "America/New_York", "593": "America/Guayaquil",
+  "598": "America/Montevideo", "595": "America/Asuncion", "591": "America/La_Paz",
+  "507": "America/Panama", "506": "America/Costa_Rica", "502": "America/Guatemala",
+  "503": "America/El_Salvador", "504": "America/Tegucigalpa", "505": "America/Managua",
+};
+function timezoneForPhone(phone: string): string {
+  const p = phone.replace(/^\+/, "");
+  return PHONE_TIMEZONE[p.slice(0, 3)] ?? PHONE_TIMEZONE[p.slice(0, 2)] ?? PHONE_TIMEZONE[p.slice(0, 1)] ?? "America/Bogota";
+}
+
+/**
+ * Bloque de fecha determinístico para el prompt. Espeja buildSalesDateContext de
+ * appril-web: el modelo JAMÁS debe derivar fechas de cabeza (siempre lleva a error).
+ */
+function buildDateContext(phone: string): string {
+  const tz = timezoneForPhone(phone);
+  const now = new Date();
+  const legible = new Intl.DateTimeFormat("es-CO", {
+    timeZone: tz, weekday: "long", year: "numeric", month: "long", day: "numeric",
+  }).format(now);
+  const iso = now.toLocaleDateString("en-CA", { timeZone: tz });
+  const hora = new Intl.DateTimeFormat("es-CO", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: true }).format(now);
+  return `[Fecha actual del lead: ${legible} -> ${iso} · hora local ${hora} (${tz})]`;
+}
+
+/**
+ * Saneado de formato para WhatsApp. Determinístico: no depende de que el modelo
+ * obedezca la regla del prompt. WhatsApp NO entiende markdown — el doble
+ * asterisco se muestra literal en pantalla ("**Email:** USD 10").
+ */
+function sanitizeWaFormat(text: string): string {
+  return text
+    .replace(/\*\*\*(.+?)\*\*\*/gs, "*$1*")   // ***negrita cursiva*** → *negrita*
+    .replace(/\*\*(.+?)\*\*/gs, "*$1*")        // **negrita** → *negrita*
+    .replace(/__(.+?)__/gs, "_$1_")            // __énfasis__ → _énfasis_
+    .replace(/^#{1,6}\s+/gm, "")               // ## Títulos → sin marca
+    .replace(/^\s*[-*]\s{2,}/gm, "- ")         // viñetas con sangría rara
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "$1: $2"); // [texto](url) → texto: url
 }
 
 // Línea de equivalencias de precios en moneda local para el prompt, leyendo la
@@ -1267,6 +1330,10 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   // Normaliza cualquier variante del link de registro al oficial. El modelo a veces
   // genera app.appril.co/auth/sign-up (heredado del documento viejo) en vez del CTA real.
   text = fixSignupUrl(text);
+
+  // Saneado de markdown: cinturón sobre la regla del prompt. WhatsApp muestra los
+  // asteriscos dobles literales; el modelo los emitía ("**Email:** USD 10/mes").
+  text = sanitizeWaFormat(text);
 
   // Turno tool-only (stop_reason "tool_use" sin bloque de texto): el diseño es de una
   // sola pasada sin round-trip de tool_result, así que si el modelo emite solo la
