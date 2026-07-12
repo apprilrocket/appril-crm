@@ -2,6 +2,15 @@
 
 > Estado: **Fases A, B, C y D COMPLETADAS** (decisión 2026-06-30: hacerlo bien, no rápido). Fases A–C el 2026-07-09; **el borrado definitivo de AWS (parte final de la Fase D) se EJECUTÓ el 2026-07-10**: 2 Lambdas, API Gateway `zkb9p2z5je`, regla EventBridge y rol IAM eliminados (verificado en vivo: 0 Lambdas, 0 API Gateways, 0 reglas, rol `NoSuchEntity`). SES y el topic SNS `ses-events-appril-crm` intactos. **Todo el ecosistema corre sin AWS.** Única cola abierta: la **rotación del `SUPABASE_SERVICE_ROLE_KEY` y del `WA_ACCESS_TOKEN`** que vivieron en las Lambdas (riesgo A5 cerrado en infra al borrar; rotación pendiente, de Mauricio — ver `SECURITY-ROTATION.md`).
 > Contexto: ver memoria `whatsapp-inbound-architecture.md`.
+>
+> **Re-verificación 2026-07-12 (AWS CLI + Supabase MCP):** Lambda `appril-crm-sender`
+> confirmado inexistente (`ResourceNotFoundException`, sin reglas EventBridge); Edge
+> `queue-sender` **v4 ACTIVE** drenando vía pg_cron `queue-sender-tick` (*/2); Edge
+> `ses-webhook` **v2 ACTIVE**. ⚠️ **Salvedad de la Fase C**: `webhook_events` estaba
+> VACÍA de eventos SES al 12-jul — el cableado SNS→`ses-webhook` en prod NO está
+> confirmado funcionando (la paridad 1:1 del 9-jul fue con correos de prueba durante la
+> convivencia). Cerrar enviando un email real por `queue-sender` y viendo aterrizar su
+> evento SES.
 
 ## 1. Arquitectura actual (post-Fases A–D, 2026-07-09)
 

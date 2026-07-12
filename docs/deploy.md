@@ -63,21 +63,24 @@ supabase functions deploy demo-callback   --use-api
 > `--use-api` empaqueta y despliega vía la Management API en vez del bundler local
 > y evita el error. Sin la bandera el deploy falla en el bundling.
 
-### Secrets de WhatsApp — dos consumidores, no uno
+### Secrets de WhatsApp — un solo sitio, cuatro consumidores
 
-> ⚠️ **`WA_ACCESS_TOKEN` no vive solo en los secrets de este proyecto Supabase.** Lo
-> consumen las Edge Functions del CRM (`whatsapp-agent`, `inbox-send`, `demo-callback` y,
-> desde la Fase B del 2026-07-09, `queue-sender`, que drena `message_queue`)
-> **y también** el Lambda `appril-crm-sender` en AWS us-east-1 (`appril-sender/src/whatsapp.ts:5`).
-> El Lambda está APAGADO como drenador desde la Fase B (EventBridge DISABLED) pero conserva
-> sus env vars y sigue siendo la reversa: **al rotar el token hay que actualizar ambos sitios
-> mientras el Lambda exista**, o la reversa nace rota. El antecedente es el incidente del
-> **2026-07-09**: se actualizó solo Supabase, el `whatsapp-agent` respondía y su health check
-> `?health=1` daba `meta_token_valid:true` (verde), pero la cola que entonces drenaba el
-> Lambda seguía rechazada por Meta en silencio (token de la app equivocada, sin acceso al
-> `phone_number_id` comercial → Meta `error_code 100`, NO 190).
-> Distinción útil: **100** = objeto/permiso inexistente (token de la app equivocada);
-> **190** = token expirado. Los system-user tokens no caducan solos.
+> **`WA_ACCESS_TOKEN` vive en UN solo sitio: los secrets de este proyecto Supabase**
+> (verificado 2026-07-12, tras el borrado del Lambda `appril-crm-sender` en la Fase D,
+> 10-jul). Lo consumen 4 Edge Functions: `whatsapp-agent`, `inbox-send`, `demo-callback`
+> y `queue-sender` (el drenador de `message_queue`). Al rotar el token basta con
+> `supabase secrets set` en este proyecto — las Edges toman el valor nuevo sin redeploy.
+>
+> **Historia (contexto del diseño, ya no aplica):** hasta el 10-jul el token vivía TAMBIÉN
+> en las env vars del Lambda `appril-crm-sender` en AWS (`appril-sender/src/whatsapp.ts:5`).
+> El incidente del **2026-07-09** fue exactamente ese doble mundo: se actualizó solo
+> Supabase, el `whatsapp-agent` daba `?health=1` en verde, pero la cola que entonces
+> drenaba el Lambda seguía rechazada por Meta en silencio (token de la app equivocada,
+> sin acceso al `phone_number_id` comercial → Meta `error_code 100`, NO 190).
+> Distinción útil vigente: **100** = objeto/permiso inexistente (token de la app
+> equivocada); **190** = token expirado. Los system-user tokens no caducan solos.
+> Si algún día se restaura el Lambda desde `appril-sender/aws-backup/`, vuelve a existir
+> el segundo sitio y esta regla de rotación doble revive.
 
 ## Orden recomendado para un cambio full-stack
 
