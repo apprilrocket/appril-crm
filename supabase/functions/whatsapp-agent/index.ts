@@ -34,6 +34,10 @@ function timingSafeEqualStr(a: string, b: string): boolean {
 // ── Sistema ─────────────────────────────────────────────────────────────────
 
 function buildSystemPrompt(ctx: LeadContext): string {
+  // Precios y hechos SELLADOS desde sales_facts (BD) — el modelo solo los repite.
+  const F = ctx.facts;
+  const dtoEmail = annualDiscountPct(F.price_email_month, F.price_email_year);
+  const dtoWa = annualDiscountPct(F.price_wa_month, F.price_wa_year);
   return `Eres Appril, asesora comercial de la plataforma Appril por WhatsApp.
 Asesora mujer. Consultiva, cálida, segura, directa. Excelente cerradora. Sin presión.
 No eres un chatbot de menú ni soporte técnico. Entiendes la operación de consultorios de salud y bienestar.
@@ -353,15 +357,15 @@ Hizo diagnóstico + volvió + acepta demo → SUPER_HOT · Pregunta precio o pid
 
 ━━━ PLANES Y PRECIOS ━━━
 
-PLAN EMAIL — USD 10/mes · USD 79/año (~35% dto.)
-PLAN WHATSAPP — USD 25/mes · USD 199/año (~35% dto.) — el más recomendado si usan WA.
-ASISTENTE WA — USD 25/mes adicional — el profesional le pide a Appril: ver agenda, crear citas, bloquear horarios, estadísticas.
+PLAN EMAIL — USD ${F.price_email_month}/mes · USD ${F.price_email_year}/año (~${dtoEmail}% dto.)
+PLAN WHATSAPP — USD ${F.price_wa_month}/mes · USD ${F.price_wa_year}/año (~${dtoWa}% dto.) — el más recomendado si usan WA.
+ASISTENTE WA — USD ${F.price_assistant_month}/mes adicional — el profesional le pide a Appril: ver agenda, crear citas, bloquear horarios, estadísticas.
 ${ctx.localPricesLine ? `\n${ctx.localPricesLine}\n` : ""}
 Al preguntar precio:
 "Tenemos tres opciones:
-Email: USD 10/mes.
-WhatsApp: USD 25/mes.
-Asistente WhatsApp: USD 25/mes adicional.
+Email: USD ${F.price_email_month}/mes.
+WhatsApp: USD ${F.price_wa_month}/mes.
+Asistente WhatsApp: USD ${F.price_assistant_month}/mes adicional.
 Si sus pacientes ya usan WhatsApp, el plan WhatsApp es el más lógico.
 ¿Hoy confirman citas por WhatsApp?"
 
@@ -395,11 +399,10 @@ ${ctx.capabilitiesLine ? `\n${ctx.capabilitiesLine}\n` : ""}
 
 Estos cuatro están medidos y se sostienen. Úsalos de a uno, en el momento de objeción o
 duda, nunca en ráfaga. Ninguno es una promesa: son lo que ya pasa.
-· Más de 8 de cada 10 pacientes RESPONDEN el recordatorio por WhatsApp. Su asistente deja de perseguirlos.
-· Los que no pueden ir, avisan a tiempo: ese espacio se puede volver a llenar.
-· Las citas con recordatorio tienen cerca de 35% menos inasistencias que las que no lo tienen.
-· Appril nace de Todoc: diez años gestionando agendas médicas en la región, más de 2 millones
-  de citas y más de 12.000 profesionales.
+· ${F.fact_reminder_response}
+· ${F.fact_notice}
+· ${F.fact_noshow}
+· ${F.fact_todoc}
 
 PROHIBIDO: cualquier otra cifra. Nada de nombres de doctores, testimonios, porcentajes de
 reducción distintos a los de arriba, ni conteos de usuarios de Appril. Si no está en esta
@@ -610,6 +613,8 @@ interface LeadContext {
   localPricesLine?: string | null;
   /** Funcionalidades relevantes al mensaje entrante, desde appril_capabilities (base de conocimiento viva). */
   capabilitiesLine?: string | null;
+  /** Precios y hechos medidos (DEC-019) sellados desde sales_facts (BD), con fallback hardcodeado. */
+  facts: Record<string, string>;
   hiddenCostTotal?: number | null;
   legacyScore?: number | null;
   primaryCtaKey?: string | null;
@@ -693,11 +698,77 @@ function sanitizeWaFormat(text: string): string {
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "$1: $2"); // [texto](url) → texto: url
 }
 
+// ── Hechos de venta sellados (sales_facts) ───────────────────────────────────
+// Precios y hechos medidos (DEC-019) viven en la tabla sales_facts — editable
+// sin redeploy, una sola fuente para este agente y los de appril-web. Estos
+// defaults son SOLO fallback si la tabla no responde: la venta nunca se
+// bloquea por un hiccup de BD. Si cambian los precios, cambia la TABLA.
+const SALES_FACTS_DEFAULTS: Record<string, string> = {
+  price_email_month:      "10",
+  price_email_year:       "79",
+  price_wa_month:         "25",
+  price_wa_year:          "199",
+  price_assistant_month:  "25",
+  fact_reminder_response: "Más de 8 de cada 10 pacientes RESPONDEN el recordatorio por WhatsApp. Su asistente deja de perseguirlos.",
+  fact_notice:            "Los que no pueden ir, avisan a tiempo: ese espacio se puede volver a llenar.",
+  fact_noshow:            "Las citas con recordatorio tienen cerca de 35% menos inasistencias que las que no lo tienen.",
+  fact_todoc:             "Appril nace de Todoc: diez años gestionando agendas médicas en la región, más de 2 millones de citas y más de 12.000 profesionales.",
+};
+
+async function loadSalesFacts(sb: any): Promise<Record<string, string>> {
+  const facts = { ...SALES_FACTS_DEFAULTS };
+  try {
+    const { data } = await sb.from("sales_facts").select("key, value");
+    for (const r of data ?? []) {
+      if (typeof r.value === "string" && r.value.trim()) facts[r.key] = r.value.trim();
+    }
+  } catch { /* fallback a defaults */ }
+  return facts;
+}
+
+// Descuento anual derivado de los precios sellados (~% dto. del prompt): se
+// calcula en código para que nunca quede desincronizado si cambia un precio.
+function annualDiscountPct(monthly: string, yearly: string): number {
+  const m = Number(monthly), y = Number(yearly);
+  return m > 0 && y > 0 && y < m * 12 ? Math.round((1 - y / (m * 12)) * 100) : 0;
+}
+
+// ── Guard determinístico de cifras (anti-alucinación) ────────────────────────
+// Extrae de la respuesta final los tokens con pinta de dinero o porcentaje y
+// los compara contra una whitelist construida con las ÚNICAS fuentes legítimas:
+// las cifras selladas (sales_facts, línea fx del día, pérdida anual del
+// diagnóstico) y los números que el propio lead escribió (eco legítimo).
+// Una cifra fuera de esas fuentes se registra como claim_flagged — NO bloquea
+// el envío (flag para el watchdog, no censura): el costo de un falso positivo
+// silenciado sería mayor que el de revisar una conversación de más.
+const CLAIM_TOKEN_RE = /(?:USD|US\$)\s*\d[\d.,]*|\$\s*\d[\d.,]*|\d[\d.,]*\s*%/gi;
+const ANY_NUMBER_RE = /\d[\d.,]*/g;
+
+function normalizeClaimDigits(token: string): string {
+  return token.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+}
+
+function buildClaimWhitelist(sealedSources: Array<string | null | undefined>, leadTexts: string[]): Set<string> {
+  const wl = new Set<string>();
+  for (const src of [...sealedSources, ...leadTexts]) {
+    for (const m of (src ?? "").match(ANY_NUMBER_RE) ?? []) wl.add(normalizeClaimDigits(m));
+  }
+  return wl;
+}
+
+function findUnlistedClaims(text: string, whitelist: Set<string>): string[] {
+  const flagged: string[] = [];
+  for (const m of text.match(CLAIM_TOKEN_RE) ?? []) {
+    if (!whitelist.has(normalizeClaimDigits(m))) flagged.push(m.trim());
+  }
+  return [...new Set(flagged)];
+}
+
 // Línea de equivalencias de precios en moneda local para el prompt, leyendo la
 // tabla fx_rates (refrescada a diario por cron desde open.er-api.com). La
 // conversión ocurre AQUÍ, en código — el modelo solo repite cifras selladas.
 // null si la moneda es USD o no hay tasa: el prompt queda como siempre.
-async function buildLocalPricesLine(sb: any, disc: any, phone: string): Promise<string | null> {
+async function buildLocalPricesLine(sb: any, disc: any, phone: string, facts: Record<string, string>): Promise<string | null> {
   const cur = String(disc?.selected_currency ?? currencyForPhone(phone)).toUpperCase();
   if (!cur || cur === "USD") return null;
   const { data: fx } = await sb.from("fx_rates")
@@ -708,10 +779,13 @@ async function buildLocalPricesLine(sb: any, disc: any, phone: string): Promise<
   if (!rate || rate <= 0) return null;
   const f = (usd: number) => `≈ $${Math.round(usd * rate).toLocaleString("es-CO")} ${cur}`;
   const day = String(fx.fetched_at).slice(0, 10);
+  const pEmailM = Number(facts.price_email_month), pEmailY = Number(facts.price_email_year);
+  const pWaM = Number(facts.price_wa_month), pWaY = Number(facts.price_wa_year);
+  const pAsis = Number(facts.price_assistant_month);
   return `EQUIVALENCIAS EN MONEDA LOCAL (tasa de referencia del ${day}: 1 USD ≈ ${rate.toLocaleString("es-CO", { maximumFractionDigits: 2 })} ${cur}):
-· Email: USD 10/mes ${f(10)} · USD 79/año ${f(79)}
-· WhatsApp: USD 25/mes ${f(25)} · USD 199/año ${f(199)}
-· Asistente WA: USD 25/mes adicional ${f(25)}
+· Email: USD ${pEmailM}/mes ${f(pEmailM)} · USD ${pEmailY}/año ${f(pEmailY)}
+· WhatsApp: USD ${pWaM}/mes ${f(pWaM)} · USD ${pWaY}/año ${f(pWaY)}
+· Asistente WA: USD ${pAsis}/mes adicional ${f(pAsis)}
 Si preguntan cuánto es en su moneda: da la cifra local con "≈" y aclara que el cobro es en USD y el valor exacto depende de la tasa del día del pago. Estas equivalencias son la ÚNICA conversión permitida — jamás calcules ni inventes otra tasa.`;
 }
 
@@ -908,29 +982,63 @@ function extractAgentResponse(content: Anthropic.ContentBlock[]): ParsedResponse
 
 // ── Handler principal ───────────────────────────────────────────────────────
 
-// Health-check del canario (GET ?health=1): verifica dependencias SIN invocar a
-// Claude ni enviar WhatsApp. Respuesta mínima (solo booleanos) — no expone valores.
+// Health-check del canario (GET ?health=1): verifica dependencias sin enviar
+// WhatsApp. Respuesta mínima (solo booleanos) — no expone valores.
+// anthropic_ok SÍ hace una llamada real mínima a Claude (1 token de salida en
+// Haiku, costo despreciable): una key revocada o una cuenta SIN SALDO devuelven
+// 4xx y el canario del watchdog alerta en ≤10 min. Cierra la brecha del
+// incidente del 12-jul-2026, donde env_anthropic_key seguía en verde con la
+// cuenta agotada y los agentes caían en silencio en la primera llamada real.
 async function healthCheck(): Promise<Response> {
   const checks: Record<string, boolean> = {
     env_wa_token:      !!Deno.env.get("WA_ACCESS_TOKEN"),
     env_wa_phone_id:   !!Deno.env.get("WA_PHONE_NUMBER_ID"),
     env_anthropic_key: !!Deno.env.get("ANTHROPIC_API_KEY"),
     meta_token_valid:  false,
+    anthropic_ok:      false,
     db_ok:             false,
   };
-  // Token Meta vigente: GET liviano a Graph API (sin costo, sin mensaje).
-  try {
-    const r = await fetch(
-      `https://graph.facebook.com/${WA_API_VERSION}/${WA_PHONE_ID}?fields=id`,
-      { headers: { Authorization: `Bearer ${WA_ACCESS_TOKEN}` }, signal: AbortSignal.timeout(5000) },
-    );
-    checks.meta_token_valid = r.ok;
-  } catch { /* queda en false */ }
-  try {
-    const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { error } = await sb.from("app_config").select("key").limit(1);
-    checks.db_ok = !error;
-  } catch { /* queda en false */ }
+  // Chequeos reales en paralelo: el canario pg_net corta a los 8s, y en serie
+  // (Meta 5s + Anthropic 6s) un doble timeout excedería la ventana.
+  await Promise.all([
+    // Token Meta vigente: GET liviano a Graph API (sin costo, sin mensaje).
+    (async () => {
+      try {
+        const r = await fetch(
+          `https://graph.facebook.com/${WA_API_VERSION}/${WA_PHONE_ID}?fields=id`,
+          { headers: { Authorization: `Bearer ${WA_ACCESS_TOKEN}` }, signal: AbortSignal.timeout(5000) },
+        );
+        checks.meta_token_valid = r.ok;
+      } catch { /* queda en false */ }
+    })(),
+    // Credencial y saldo Anthropic: llamada real mínima.
+    (async () => {
+      try {
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 1,
+            messages: [{ role: "user", content: "ok" }],
+          }),
+          signal: AbortSignal.timeout(6000),
+        });
+        checks.anthropic_ok = r.ok;
+      } catch { /* queda en false */ }
+    })(),
+    (async () => {
+      try {
+        const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const { error } = await sb.from("app_config").select("key").limit(1);
+        checks.db_ok = !error;
+      } catch { /* queda en false */ }
+    })(),
+  ]);
   const ok = Object.values(checks).every(Boolean);
   return new Response(JSON.stringify({ ok, agent: "crm_wa_agent", checks }), {
     status: ok ? 200 : 503,
@@ -1305,16 +1413,56 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   //    (reintentos / mismo turno). Si el doctor INSISTE pasada la guarda, se crea otra
   //    demo (en otro horario) — pedir la demo de nuevo NO es spam, es solicitud explícita.
   const { data: demoCfg } = await sb
-    .from("app_config").select("key, value").in("key", ["demo_cooldown_hours", "demo_resend_guard_minutes"]);
+    .from("app_config").select("key, value").in("key", ["demo_cooldown_hours", "demo_resend_guard_minutes", "agent_reply_cap_24h"]);
   const cfgMap: Record<string, string> = Object.fromEntries((demoCfg ?? []).map((r: any) => [r.key, r.value]));
   const demoCooldownHours = Number(cfgMap["demo_cooldown_hours"]) || 24;
   const demoGuardMinutes  = Number(cfgMap["demo_resend_guard_minutes"]) || 3;
   const demoCutoff = new Date(Date.now() - demoCooldownHours * 3600_000).toISOString();
 
+  // Cap duro de respuestas del agente por lead/24h (app_config agent_reply_cap_24h,
+  // default 30): un loop bot-contra-bot o un lead que escribe sin parar no puede
+  // quemar tokens de Sonnet sin límite. Al alcanzarlo, escalada determinística
+  // (mismo efecto que el handoff): aviso al lead, contexto a Mauricio y agente
+  // pausado — un lead tan activo merece un humano, no silencio.
+  const replyCap = Number(cfgMap["agent_reply_cap_24h"]) || 30;
+  const { count: repliesLast24h } = await sb
+    .from("lead_events")
+    .select("id", { count: "exact", head: true })
+    .eq("lead_id", lead.id)
+    .eq("event_type", "wa_agent_reply")
+    .gte("created_at", new Date(Date.now() - 24 * 3600_000).toISOString());
+  if ((repliesLast24h ?? 0) >= replyCap) {
+    const capMsg = "Para darle una atención más completa, le paso con una persona del equipo Appril — le escribe en breve por aquí mismo. Gracias por la paciencia 🙏";
+    const capSend = await sendWA(fromPhone, capMsg, []);
+    await sb.from("lead_events").insert({
+      workspace_id: WORKSPACE_ID,
+      lead_id: lead.id,
+      event_type: "wa_agent_reply",
+      event_channel: "whatsapp",
+      event_value: capMsg,
+      metadata: { via: "reply_cap", send_ok: capSend.ok, ...(capSend.error ? { send_error: capSend.error } : {}) },
+    });
+    await sendWA(
+      `+${MAURICIO_WA}`,
+      `⚠️ Cap del agente alcanzado: ${replyCap} respuestas en 24h con ${lead.full_name ?? "Desconocido"} · ${fromPhone}. El agente quedó pausado — la conversación es tuya (inbox del CRM).`,
+      [],
+    );
+    await sb.from("leads_master").update({ agent_paused: true }).eq("id", lead.id);
+    await sb.from("lead_events").insert({
+      workspace_id: WORKSPACE_ID,
+      lead_id: lead.id,
+      event_type: "escalated_to_human",
+      event_channel: "whatsapp",
+      event_value: lead.full_name ?? "Desconocido",
+      metadata: { via: "reply_cap", replies_24h: repliesLast24h, cap: replyCap, to: MAURICIO_WA },
+    });
+    return;
+  }
+
   // Datos de discovery, demo y resultado de la demo en paralelo.
   // demo_created / demo_callback_sent se acotan al cooldown: una demo vieja (fuera de
   // la ventana) NO cuenta como "ya creada" → el agente puede ofrecer/crear una nueva.
-  const [{ data: disc }, { data: demoEvent }, { data: demoOutcomeEvent }] = await Promise.all([
+  const [{ data: disc }, { data: demoEvent }, { data: demoOutcomeEvent }, facts] = await Promise.all([
     sb
       .from("discovery_leads")
       .select("id, agenda_maturity_level, annual_lost_revenue, hidden_cost_total, marketing_segment, q_urgency, desired_next_step, risk_dominant, main_pain, recommended_action, selected_currency, legacy_lead_score, primary_cta_key, created_at, frontend_calculations")
@@ -1340,6 +1488,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    loadSalesFacts(sb),
   ]);
 
   const messageCount = (history ?? []).length;
@@ -1351,7 +1500,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
 
   const rc = riskCopy(disc?.risk_dominant);
   const fcCurrency = ((disc as any)?.frontend_calculations?.currency ?? null) as Record<string, any> | null;
-  const localPricesLine = await buildLocalPricesLine(sb, disc, fromPhone);
+  const localPricesLine = await buildLocalPricesLine(sb, disc, fromPhone, facts);
   const capabilitiesLine = await capabilitiesForPain(sb, userText);
 
   const ctx: LeadContext = {
@@ -1383,6 +1532,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
                           : null,
     localPricesLine,
     capabilitiesLine,
+    facts,
     hiddenCostTotal:    disc?.hidden_cost_total ?? null,
     legacyScore:        disc?.legacy_lead_score ?? null,
     primaryCtaKey:      disc?.primary_cta_key ?? null,
@@ -1393,14 +1543,60 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
 
   const messages = buildMessages(history ?? [], userText);
 
-  const completion = await ai.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 2000, // tools añaden overhead de JSON en la salida; holgura para texto largo + tool_use
-    system: buildSystemPrompt(ctx),
-    messages,
-    tools: AGENT_TOOLS,
-    tool_choice: { type: "auto" },
-  });
+  // La llamada al LLM puede fallar (saldo Anthropic agotado, 429, 5xx, timeout).
+  // Sin este catch la caída era SILENCIOSA: el lead no recibía nada, se
+  // respondía 200 a Meta y la única señal era el wa_no_reply indirecto del
+  // watchdog. Ahora: evento agent_llm_error (→ incidente llm_error con causa
+  // explícita en ≤10 min) + fallback estático al lead con dedupe de 30 min
+  // (durante una caída larga no se le repite el mismo mensaje en cadena).
+  let completion: Anthropic.Message;
+  try {
+    completion = await ai.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 2000, // tools añaden overhead de JSON en la salida; holgura para texto largo + tool_use
+      system: buildSystemPrompt(ctx),
+      messages,
+      tools: AGENT_TOOLS,
+      tool_choice: { type: "auto" },
+    });
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    console.error(`Anthropic falló para lead ${lead.id}: ${errMsg}`);
+    await sb.from("lead_events").insert({
+      workspace_id: WORKSPACE_ID,
+      lead_id: lead.id,
+      event_type: "agent_llm_error",
+      event_channel: "whatsapp",
+      event_value: errMsg.slice(0, 500),
+      metadata: { wa_message_id: msg.id, model: "claude-sonnet-4-6" },
+    });
+    const { data: recentFallback } = await sb.from("lead_events")
+      .select("id")
+      .eq("lead_id", lead.id)
+      .eq("event_type", "wa_agent_reply")
+      .eq("metadata->>via", "llm_error_fallback")
+      .gte("created_at", new Date(Date.now() - 30 * 60_000).toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (!recentFallback) {
+      const sorry = "Gracias por su mensaje 🙏 En este momento tengo un inconveniente técnico; apenas se resuelva le respondo por aquí mismo.";
+      const fb = await sendWA(fromPhone, sorry, []);
+      await sb.from("lead_events").insert({
+        workspace_id: WORKSPACE_ID,
+        lead_id: lead.id,
+        event_type: "wa_agent_reply",
+        event_channel: "whatsapp",
+        event_value: sorry,
+        metadata: {
+          via: "llm_error_fallback",
+          send_ok: fb.ok,
+          ...(fb.error ? { send_error: fb.error } : {}),
+          ...(fb.waMessageId ? { wa_message_id: fb.waMessageId } : {}),
+        },
+      });
+    }
+    return;
+  }
 
   // Si la generación se corta por max_tokens en medio de un bloque tool_use, la API
   // descarta el bloque incompleto de content (los text previos sí llegan): el lead
@@ -1424,6 +1620,39 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   // Saneado de markdown: cinturón sobre la regla del prompt. WhatsApp muestra los
   // asteriscos dobles literales; el modelo los emitía ("**Email:** USD 10/mes").
   text = sanitizeWaFormat(text);
+
+  // Guard determinístico de cifras: cualquier monto o porcentaje que no venga de
+  // las fuentes selladas (sales_facts, línea fx, pérdida anual del diagnóstico,
+  // dto. anual calculado) ni de lo que el lead mismo escribió, queda registrado
+  // como claim_flagged (el watchdog lo vuelve incidente). No bloquea el envío.
+  if (text.trim()) {
+    const leadTexts = [
+      userText,
+      ...(history ?? []).filter((h: any) => h.event_type === "wa_reply").map((h: any) => String(h.event_value ?? "")),
+    ];
+    const whitelist = buildClaimWhitelist(
+      [
+        Object.values(facts).join(" "),
+        localPricesLine,
+        ctx.annualLostLocal,
+        String(annualDiscountPct(facts.price_email_month, facts.price_email_year)),
+        String(annualDiscountPct(facts.price_wa_month, facts.price_wa_year)),
+      ],
+      leadTexts,
+    );
+    const flaggedClaims = findUnlistedClaims(text, whitelist);
+    if (flaggedClaims.length > 0) {
+      console.warn(`claim_flagged lead ${lead.id}: ${flaggedClaims.join(" · ")}`);
+      await sb.from("lead_events").insert({
+        workspace_id: WORKSPACE_ID,
+        lead_id: lead.id,
+        event_type: "claim_flagged",
+        event_channel: "whatsapp",
+        event_value: text.slice(0, 500),
+        metadata: { tokens: flaggedClaims, wa_message_id: msg.id },
+      });
+    }
+  }
 
   // Turno tool-only (stop_reason "tool_use" sin bloque de texto): el diseño es de una
   // sola pasada sin round-trip de tool_result, así que si el modelo emite solo la
