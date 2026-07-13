@@ -89,7 +89,7 @@ async function processCallback(payload: any) {
   if (action === "confirm") {
     message =
       `Acaba de confirmar, doctor. 🎉\n\n` +
-      `Eso que vivió — recibir el mensaje, ver los botones, confirmar con un toque — es exactamente lo que vivirían sus pacientes.\n\n` +
+      `Eso que vivió — recibir el mensaje, ver los botones, confirmar con un solo botón — es exactamente lo que vivirían sus pacientes.\n\n` +
       `Sin llamadas. Sin perseguir a nadie. Sin WhatsApp manual.\n\n` +
       `Puede empezar hoy, sin tarjeta:\n${SIGNUP_URL}`;
   } else {

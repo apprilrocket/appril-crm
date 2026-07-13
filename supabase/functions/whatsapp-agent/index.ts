@@ -281,7 +281,7 @@ ${ctx.name !== "Desconocido"
   : "Si no tienes nombre, pídelo brevemente. Luego di:"}
 "Le voy a mostrar algo en vivo, doctor/a.
 En unos segundos le va a llegar un WhatsApp desde el número de pacientes de Appril — no desde este chat.
-Tóquelo como si usted fuera el paciente."
+Respóndalo como si usted fuera el paciente: confirme o cancele con los botones."
 → Usa la herramienta create_demo junto con tu respuesta. ${ctx.demoAlreadyCreated
     ? ctx.demoOutcome === "confirm"
       ? `✅ DEMO YA VIVIDA Y CONFIRMADA — NO usar la herramienta create_demo. NO preguntar si encontró el mensaje. NO volver a explicar qué va a llegar. El doctor ya tocó "Confirmar" y vivió el ajá moment. Retoma desde el remate ("¿Vio qué simple? Un toque. Eso mismo harían sus pacientes sin que nadie los persiga.") solo si aún no se lo dijiste, y avanza directo a MODO CIERRE: link sin tarjeta o acompañamiento del equipo Appril.`
@@ -299,7 +299,7 @@ NUNCA digas "Le acabo de crear" ni "Ya le envié" — eso lo confirma el sistema
 REMATE SEGÚN ACCIÓN (primero refuerza lo que acaba de comprobar, luego el link — nunca "ya vivió la demo y quiere activar"):
 · Confirmó → "Doctor/a, eso que acaba de ver es el punto: el paciente confirma con un toque y el consultorio gana claridad sin perseguirlo por WhatsApp.\nPuede empezar sin tarjeta aquí:\n${SIGNUP_URL}\nSi prefiere no configurarlo solo, alguien del equipo Appril puede acompañarlo 10–15 minutos para dejar activos sus primeros recordatorios y confirmaciones."
 · Canceló → "Doctor/a, incluso cuando el paciente cancela, el consultorio gana algo importante: claridad a tiempo. Eso permite reaccionar antes, liberar el espacio o evitar estar escribiendo uno por uno por WhatsApp.\nPuede empezar sin tarjeta aquí:\n${SIGNUP_URL}\n¿Quiere que alguien del equipo Appril lo acompañe a dejar el primer flujo listo?"
-· No responde → "Debe llegar desde el número de pacientes de Appril. Cuando la toque, el sistema lo registra al instante."
+· No responde → "Debe llegar desde el número de pacientes de Appril. Cuando confirme o cancele, el sistema lo registra al instante."
 · Demo falla → "Parece que se demoró. Le paso con alguien del equipo Appril para que se la muestre en vivo." usa la herramienta handoff_mauricio (lead_name: "${ctx.name}")
 
 ━━━ DIAGNÓSTICO DE AGENDA BLINDADA ━━━
@@ -1667,7 +1667,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
       text = `Doctor/a, por lo que me cuenta, vale la pena que alguien del equipo Appril lo acompañe directamente. Le paso el contexto a Mauricio García, fundador de Appril, para que no tenga que repetir todo.`;
       toolOnlyFallback = true;
     } else if (createDemo && !demoRecentlyCreated) {
-      text = `Le voy a mostrar algo en vivo, doctor/a.\nEn unos segundos le va a llegar un WhatsApp desde el número de pacientes de Appril — no desde este chat.\nTóquelo como si usted fuera el paciente.`;
+      text = `Le voy a mostrar algo en vivo, doctor/a.\nEn unos segundos le va a llegar un WhatsApp desde el número de pacientes de Appril — no desde este chat.\nRespóndalo como si usted fuera el paciente: confirme o cancele con los botones.`;
       toolOnlyFallback = true;
     } else if (createDemo && demoRecentlyCreated) {
       // Guarda anti-doble-disparo activa: la demo NO se recrea (abajo), pero callar
