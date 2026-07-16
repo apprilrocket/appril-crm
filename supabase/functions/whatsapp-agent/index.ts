@@ -134,7 +134,14 @@ APERTURA CÁLIDA (regla de conversación): primero saluda, posiciónate y ofrece
 
 Prioridad de apertura para el primer mensaje — evalúa en este orden:
 
-1. REFERIDO — ${ctx.referredByName
+1. REFERIDO POR UN PACIENTE (source = 'appril_referral') — ${ctx.source === "appril_referral"
+    ? `Este lead llegó porque ${ctx.referredByName || "un paciente"} tuvo una cita con un profesional que usa Appril, vivió la experiencia como paciente y pensó en esta persona (dueño/a de un negocio o consultorio) para que implemente Appril. YA recibió un mensaje de apertura (plantilla) contándole esto y preguntándole "¿Usted atiende pacientes o agenda clientes?", con dos botones: "Si. Atiendo pacientes/clientes" (interés fuerte) y "Quiero más información" (interés tibio, menos compromiso).
+NO repitas la historia del referido ni vuelvas a hacer la pregunta de la plantilla: ya la vio. Conecta con lo que respondió:
+· Si tocó "Si. Atiendo pacientes/clientes" (o dijo que sí atiende): "¡Qué bueno${ctx.name !== "Desconocido" ? `, ${ctx.name.split(" ")[0]}` : ""}! Entonces Appril le encaja. Cuénteme, ¿qué es lo que más le cuesta hoy: que le confirmen las citas, las cancelaciones a última hora, o el WhatsApp manual con cada cliente?" → escucha y avanza a insight/demo.
+· Si tocó "Quiero más información" (tibio): dé UNA línea simple y cálida sin abrumar: "Con gusto${ctx.name !== "Desconocido" ? `, ${ctx.name.split(" ")[0]}` : ""}. Appril le ayuda a que sus pacientes o clientes confirmen, cancelen o reagenden solos por WhatsApp, sin que usted (o su equipo) tenga que perseguirlos. Para contarle lo justo para su caso: ¿usted atiende pacientes o agenda clientes?" → luego una sola pregunta de dolor.
+· Si escribió texto libre: continúa la venta con calidez reconociendo que viene por recomendación, sin repetir la historia completa.
+Trato de USTED. Una sola pregunta por mensaje.`
+    : ctx.referredByName
     ? `Abre con el referido sin abusar del nombre. Di: "${ctx.referredByName} me sugirió escribirle porque Appril puede ayudarle a ordenar confirmaciones, cancelaciones y seguimiento de citas por WhatsApp.\nPara ubicarme rápido: ¿qué le pesa más hoy — pacientes que no llegan, cancelaciones tarde o estar confirmando citas una por una?"`
     : "no aplica"}
 
@@ -589,6 +596,8 @@ interface LeadContext {
   name: string;
   phone: string;
   segment: string;
+  /** leads_master.source — origen del lead (appril_referral, appril_nps_self, discovery, whatsapp_inbound…). */
+  source?: string | null;
   referredByName?: string | null;
   urgency?: string;
   maturity?: string;
@@ -1256,7 +1265,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   // Buscar lead — usar limit(1) para evitar error si hay duplicados históricos
   const { data: leads } = await sb
     .from("leads_master")
-    .select("id, full_name, phone, email, marketing_segment, referred_by_name, agent_paused, whatsapp_opted_in, commercial_intent, cta_intent")
+    .select("id, full_name, phone, email, source, marketing_segment, referred_by_name, agent_paused, whatsapp_opted_in, commercial_intent, cta_intent")
     .or(`phone.eq.${fromPhone},phone.eq.${msg.from}`)
     .order("created_at", { ascending: false })
     .limit(1);
@@ -1507,6 +1516,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
     name:               lead.full_name ?? "Desconocido",
     phone:              fromPhone,
     segment:            disc?.marketing_segment ?? lead.marketing_segment ?? "COLD",
+    source:             lead.source ?? null,
     referredByName:     lead.referred_by_name ?? null,
     urgency:            disc?.q_urgency,
     maturity:           disc?.agenda_maturity_level,
