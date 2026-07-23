@@ -165,7 +165,7 @@ export function buildServer(): McpServer {
     wrap(() => queueStatus()));
 
   server.registerTool("campaign_stats",
-    { description: "Métricas de una campaña: enviados, fallidos, abiertos, clics, rebotes.", inputSchema: { campaign_id: z.string() } },
+    { description: "Métricas de una campaña: cola por status y por triggered_by (lote vs seed), y engagement email (eventos y leads únicos de opens/clics/rebotes vía metadata.campaign_id). WA no es atribuible por campaña todavía.", inputSchema: { campaign_id: z.string() } },
     wrap((a: { campaign_id: string }) => campaignStats(a.campaign_id)));
 
   // ── Automations / secuencias (sólo borrador; activar/enrolar es humano) ────

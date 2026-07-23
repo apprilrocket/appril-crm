@@ -107,7 +107,7 @@ Handshake estándar MCP: `initialize` → `notifications/initialized` → `tools
 | Tool | Parámetros | Qué hace |
 |---|---|---|
 | `queue_status` | — | Estado global de la cola (pending/sent/failed...). |
-| `campaign_stats` | `campaign_id` | Enviados, fallidos, abiertos, clics, rebotes. |
+| `campaign_stats` | `campaign_id` | Cola por status y por `triggered_by` (lote vs seed) + engagement email: opens/clics/rebotes en eventos y en leads únicos (atribución por `metadata.campaign_id`; WA no atribuible aún). |
 
 ### Secuencias (automations) — solo borrador
 | Tool | Parámetros | Qué hace |
