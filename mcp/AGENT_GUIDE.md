@@ -125,7 +125,7 @@ Handshake estándar MCP: `initialize` → `notifications/initialized` → `tools
 | `lead_timeline` | `lead_id`, `[limit]` | Timeline de `lead_events`, más reciente primero (default 50, máx 200). |
 | `inbox_threads` | `[limit]` | Hilos del inbox unificado (misma RPC que el dashboard): último inbound/outbound, unread, `last_wa_reply_at`, flags de canal. |
 | `get_conversation` | `lead_id` | Conversación completa (burbujas con receipts) + estado calculado de la **ventana de 24h de Meta** (open/expires_at). |
-| `get_report` | `report` (`funnel`/`channel_stats`/`activity_daily`/`quality_summary`), `[days]` | Reportes agregados del CRM. |
+| `get_report` | `report` (`funnel`/`channel_stats`/`activity_daily`/`quality_summary`), `[days]`, `[include_seed]` | Reportes agregados del CRM. SEED excluido por defecto. |
 | `agent_health` | `[status]` (`open`/`notified`/`resolved`), `[limit]` | Incidentes del watchdog de agentes WA (`agent_health_incidents`) + conteo de abiertos. |
 
 ### Escrituras acotadas sobre leads (2026-07-09, `e05df51`) — jamás tocan `message_queue`
@@ -200,6 +200,23 @@ create_email_template({
 - Si `preview_audience` falla con *"function not found"*, falta aplicar la migración
   `mcp_campaign_launch` en la BD.
 - Distingue siempre **`audience`** (total) de **`eligible`** (los que de verdad reciben).
+
+### Regla SEED (DEC-023 gate D — obligatoria en TODA lectura)
+
+Los seeds internos (`leads_master.marketing_segment = 'SEED'`, envíos con
+`message_queue.triggered_by = 'seed_internal'`) son QA técnico: **existen como
+evidencia histórica pero JAMÁS cuentan como mercado**. Por eso:
+
+- `campaign_stats`, `get_report` y las RPCs de reporte del dashboard los
+  **excluyen por defecto**; solo aparecen con `include_seed=true`, y ese flag se
+  usa únicamente para auditar evidencia, nunca para métricas de negocio.
+- Todo reporte que redactes debe separar cuatro poblaciones y decirlo
+  explícitamente: **seed_internal** (QA), **lotes reales** (`triggered_by` del
+  lote), **tests** (campañas `PRUEBA`/allowlist) y **leads reales**.
+- Nunca uses el total con seeds como denominador de un lote (lección del HOT 30:
+  el "completó Discovery" del reporte era un seed; la lectura real era 0).
+- `by_trigger` de `campaign_stats` siempre muestra el desglose completo — úsalo
+  para declarar cuántos seeds quedaron fuera.
 
 ---
 

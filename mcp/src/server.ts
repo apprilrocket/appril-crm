@@ -165,8 +165,8 @@ export function buildServer(): McpServer {
     wrap(() => queueStatus()));
 
   server.registerTool("campaign_stats",
-    { description: "Métricas de una campaña: cola por status y por triggered_by (lote vs seed), y engagement email (eventos y leads únicos de opens/clics/rebotes vía metadata.campaign_id). WA no es atribuible por campaña todavía.", inputSchema: { campaign_id: z.string() } },
-    wrap((a: { campaign_id: string }) => campaignStats(a.campaign_id)));
+    { description: "Métricas de una campaña: cola por status y engagement email (eventos y leads únicos de opens/clics/rebotes vía metadata.campaign_id). Los seeds internos quedan EXCLUIDOS por defecto (DEC-023 gate D; by_trigger siempre muestra el desglose completo); include_seed=true los reincorpora solo como evidencia. WA no es atribuible por campaña todavía.", inputSchema: { campaign_id: z.string(), include_seed: z.boolean().optional().describe("Default false: excluye seeds (triggered_by=seed_internal o lead SEED). true solo para auditar evidencia histórica.") } },
+    wrap((a: { campaign_id: string; include_seed?: boolean }) => campaignStats(a.campaign_id, a.include_seed ?? false)));
 
   // ── Automations / secuencias (sólo borrador; activar/enrolar es humano) ────
   server.registerTool("list_automations",
@@ -239,10 +239,11 @@ export function buildServer(): McpServer {
 
   server.registerTool("get_report",
     {
-      description: "Reportes agregados del CRM: funnel (leads por etapa), channel_stats (enviado/entregado/abierto/click/respuesta/fallo por canal), activity_daily (outbound/inbound por día), quality_summary (calidad de datos de leads). Solo lectura.",
+      description: "Reportes agregados del CRM: funnel (leads por etapa), channel_stats (enviado/entregado/abierto/click/respuesta/fallo por canal), activity_daily (outbound/inbound por día), quality_summary (calidad de datos de leads). Solo lectura. Los leads SEED quedan EXCLUIDOS por defecto (DEC-023 gate D); include_seed=true los reincorpora solo como evidencia.",
       inputSchema: {
         report: z.enum(["funnel", "channel_stats", "activity_daily", "quality_summary"]),
         days: z.number().int().optional().describe("Ventana en días para channel_stats (default 30) y activity_daily (default 14)."),
+        include_seed: z.boolean().optional().describe("Default false: excluye leads SEED. true solo para auditar evidencia histórica; jamás para métricas de negocio."),
       },
     },
     wrap(getReport));
