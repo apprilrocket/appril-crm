@@ -1332,6 +1332,11 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
   // El índice único uq_lead_events_wa_reply_wamid garantiza que una entrega
   // doble (Meta retry / doble suscripción) no se procese dos veces: si el
   // insert falla por conflicto, otro proceso ya está atendiendo este mensaje.
+  // El flag auto_responder viaja EN el propio wa_reply (atómico con el insert):
+  // lo leen auto_advance_pipeline (no califica al lead), la condición
+  // human_wa_replied de las automations de seguimiento y el trigger
+  // auto_exit_runs_on_human_signal (migración 20260727_1000).
+  const autoResponder = !isButtonReply && isAutoResponder(userText);
   const { error: replyInsertErr } = await sb.from("lead_events").insert({
     workspace_id: WORKSPACE_ID,
     lead_id: lead.id,
@@ -1342,6 +1347,7 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
       wa_message_id: msg.id,
       phone: fromPhone,
       kind: isButtonReply ? "button_reply" : "text",
+      ...(autoResponder ? { auto_responder: true } : {}),
       ...(isButtonReply
         ? {
           button_id: btnReply?.id ?? tplBtn?.payload ?? null,
@@ -1384,8 +1390,9 @@ async function handleMessage(msg: any, sb: any, ai: Anthropic) {
 
   // Contestador automático del propio consultorio (WhatsApp Business): no es un
   // humano. Lo registramos pero NO respondemos — evita gastar tokens/mensajes y
-  // loops bot-contra-bot.
-  if (isAutoResponder(userText)) {
+  // loops bot-contra-bot. (El wa_reply de arriba ya quedó sellado con
+  // metadata.auto_responder=true; las automations de seguimiento lo ignoran.)
+  if (autoResponder) {
     await sb.from("lead_events").insert({
       workspace_id: WORKSPACE_ID,
       lead_id: lead.id,
