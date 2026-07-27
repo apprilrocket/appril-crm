@@ -164,12 +164,12 @@ demo falló con intención alta · el agente no está seguro.
 
 | event_type | Significado |
 |---|---|
-| `wa_reply` | Mensaje entrante del lead. |
+| `wa_reply` | Mensaje entrante del lead. Desde el 27-jul lleva `metadata.auto_responder=true` si es un contestador automático (sellado atómico en el insert; lo leen `auto_advance_pipeline`, la condición `human_wa_replied` y el trigger `trg_auto_exit_on_human_signal` — ver contrato `appril-growth/13-integrations/referidos-contacto-garantizado-contract.md`). |
 | `wa_agent_reply` | Respuesta del agente (o del inbox manual). |
 | `wa_sent` / `wa_delivered` / `wa_read` / `wa_failed` | Estados de salida de Meta. |
 | `demo_created` | Demo viva creada (valor = appointment_id o `duplicate_reused`). |
 | `demo_callback_sent` | El doctor tocó Confirmar/Cancelar; se envió el remate. |
 | `escalated_to_human` | Handoff a Mauricio ejecutado. |
 | `unsubscribed` | Opt-out. |
-| `wa_auto_responder_skipped` | Contestador automático detectado, no se respondió. |
+| `wa_auto_responder_skipped` | Contestador automático detectado, no se respondió. Informativo (a veces no queda registrado — caso Lina 25-jul); la lógica usa el flag `auto_responder` del `wa_reply`, no este evento. |
 | `automation_send_skipped` | Outbound no encolado (p. ej. teléfono no E.164). |
