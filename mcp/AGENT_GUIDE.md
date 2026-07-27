@@ -203,7 +203,7 @@ create_email_template({
 
 ### Regla SEED (DEC-023 gate D — obligatoria en TODA lectura)
 
-Los seeds internos (`leads_master.marketing_segment = 'SEED'`, envíos con
+Los seeds internos y leads de prueba (`leads_master.marketing_segment` `SEED` o `TEST`, envíos con
 `message_queue.triggered_by = 'seed_internal'`) son QA técnico: **existen como
 evidencia histórica pero JAMÁS cuentan como mercado**. Por eso:
 

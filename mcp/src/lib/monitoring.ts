@@ -25,10 +25,11 @@ export async function queueStatus() {
  * evento) y la tool reportaba 0 siempre. Los eventos wa_delivered/wa_read no
  * llevan atribución de campaña en metadata, así que no son contabilizables aquí.
  *
- * Regla SEED (DEC-023 gate D): los seeds internos (message_queue.triggered_by =
- * 'seed_internal' o leads_master.marketing_segment = 'SEED') quedan EXCLUIDOS
- * por defecto de totales y engagement; solo entran con include_seed=true.
- * by_trigger siempre muestra el desglose completo (evidencia histórica).
+ * Regla SEED/TEST (DEC-023 gates D y C): seeds internos (message_queue.
+ * triggered_by = 'seed_internal' o leads_master.marketing_segment = 'SEED') y
+ * leads de prueba (marketing_segment = 'TEST') quedan EXCLUIDOS por defecto de
+ * totales y engagement; solo entran con include_seed=true. by_trigger siempre
+ * muestra el desglose completo (evidencia histórica).
  */
 export async function campaignStats(campaign_id: string, include_seed = false) {
   // Mensajes de la campaña (triggered_by separa lote real vs seeds internos)
@@ -48,7 +49,7 @@ export async function campaignStats(campaign_id: string, include_seed = false) {
       .from("leads_master")
       .select("id")
       .eq("workspace_id", WORKSPACE_ID)
-      .eq("marketing_segment", "SEED")
+      .in("marketing_segment", ["SEED", "TEST"])
       .in("id", leadIds);
     for (const s of seeds ?? []) seedLeads.add(s.id);
   }
