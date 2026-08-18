@@ -128,6 +128,8 @@ Handshake estándar MCP: `initialize` → `notifications/initialized` → `tools
 | `get_report` | `report` (`funnel`/`channel_stats`/`activity_daily`/`quality_summary`), `[days]`, `[include_seed]` | Reportes agregados del CRM. SEED excluido por defecto. |
 | `agent_health` | `[status]` (`open`/`notified`/`resolved`), `[limit]` | Incidentes del watchdog de agentes WA (`agent_health_incidents`) + conteo de abiertos. |
 
+> **⚠️ REGLA (18-ago-2026) — `agent_health` con 0 abiertas NO significa "todo sano".** La tool lee `agent_health_incidents`; si el **productor** de esa tabla (pg_cron `agent-health-tick`) está caído, la tabla se queda vacía y la lectura da un **falso verde**. Ocurrió durante **32 días** (17-jul → 18-ago: 4.646 corridas fallidas seguidas, 173 incidentes todos `resolved`, 0 abiertas) y la routine de revisión diaria heredó la ceguera. **Antes de reportar "agentes sanos", verifica la última corrida exitosa del tick**: `SELECT max(start_time) FROM cron.job_run_details d JOIN cron.job j USING (jobid) WHERE j.jobname='agent-health-tick' AND d.status='succeeded'` (debe ser < 20 min). Desde el 18-ago el cron `agent-health-selfcheck` (`7 * * * *`) abre un incidente `watchdog_down` si el tick lleva >1h sin corrida OK — pero **la ausencia de incidentes sigue sin ser evidencia de salud**.
+
 ### Escrituras acotadas sobre leads (2026-07-09, `e05df51`) — jamás tocan `message_queue`
 | Tool | Parámetros | Qué hace |
 |---|---|---|
