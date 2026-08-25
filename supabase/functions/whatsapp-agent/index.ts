@@ -1007,6 +1007,11 @@ async function healthCheck(): Promise<Response> {
     anthropic_ok:      false,
     db_ok:             false,
   };
+  // Motivo del fallo por dependencia. Sin esto, un 429 (límite de tasa), un 529
+  // (sobrecarga de Anthropic), una key revocada y un timeout se ven IDÉNTICOS:
+  // anthropic_ok=false. Guardar el motivo convierte cada alerta del watchdog en
+  // un diagnóstico legible en vez de una excavación (incidentes 24/25-ago-2026).
+  const detail: Record<string, string> = {};
   // Chequeos reales en paralelo: el canario pg_net corta a los 8s, y en serie
   // (Meta 5s + Anthropic 6s) un doble timeout excedería la ventana.
   await Promise.all([
@@ -1038,7 +1043,15 @@ async function healthCheck(): Promise<Response> {
           signal: AbortSignal.timeout(6000),
         });
         checks.anthropic_ok = r.ok;
-      } catch { /* queda en false */ }
+        if (!r.ok) {
+          let tipo = "";
+          try { tipo = (await r.json())?.error?.type ?? ""; } catch { /* cuerpo no JSON */ }
+          detail.anthropic = `http_${r.status}${tipo ? `:${tipo}` : ""}`;
+        }
+      } catch (e) {
+        const n = (e as Error)?.name;
+        detail.anthropic = n === "TimeoutError" ? "timeout_6s" : `error:${n ?? "unknown"}`;
+      }
     })(),
     (async () => {
       try {
@@ -1049,7 +1062,7 @@ async function healthCheck(): Promise<Response> {
     })(),
   ]);
   const ok = Object.values(checks).every(Boolean);
-  return new Response(JSON.stringify({ ok, agent: "crm_wa_agent", checks }), {
+  return new Response(JSON.stringify({ ok, agent: "crm_wa_agent", checks, ...(Object.keys(detail).length ? { detail } : {}) }), {
     status: ok ? 200 : 503,
     headers: { "Content-Type": "application/json" },
   });
